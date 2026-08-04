@@ -1,0 +1,41 @@
+{
+  "name": "@keetar/core",
+  "version": "0.1.0",
+  "description": "A TypeScript-native, isomorphic KDBX4 library — parsing, crypto, and vault management for KeePass-compatible databases.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "MIT",
+  "contributors": [
+    {
+      "name": "Antelle",
+      "email": "keeweb@keeweb.info",
+      "url": "https://antelle.net",
+      "comment": "Original author of kdbxweb, from which the crypto/kdbx modules are forked via gynet/keewebx"
+    },
+    {
+      "name": "gynet",
+      "url": "https://github.com/gynet",
+      "comment": "Author of keewebx, forked from kdbxweb; keetar's crypto/kdbx modules are bootstrapped from keewebx's packages/db"
+    }
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@stablelib/chacha": "^2.0.1",
+    "@xmldom/xmldom": "^0.8.10",
+    "fflate": "^0.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "argon2-browser": "^1.18.0",
+    "typescript": "~5.9.0",
+    "vitest": "^2.1.0"
+  }
+}

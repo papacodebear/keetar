@@ -103,21 +103,44 @@ keetar/
 ├── packages/
 │   ├── core/                          # @keetar/core — isomorphic, no browser APIs
 │   │   ├── src/
-│   │   │   ├── crypto/
-│   │   │   │   ├── engine.ts          # Master key derivation + decrypt/encrypt pipeline
-│   │   │   │   ├── kdf.ts             # Argon2id (WASM) + AES-KDF adapter
-│   │   │   │   ├── aes.ts             # AES-256-CBC/GCM wrappers over the platform crypto interface
-│   │   │   │   ├── chacha20.ts        # ChaCha20 inner stream (pure JS, audited library)
-│   │   │   │   ├── hmac.ts            # HMAC-SHA256/512 block authentication
-│   │   │   │   ├── random.ts          # CSPRNG wrappers over the platform crypto interface
-│   │   │   │   └── platform-crypto.ts # Interface engine/aes/hmac/random depend on (§3.2)
-│   │   │   ├── kdbx/
-│   │   │   │   ├── parser.ts          # Binary KDBX reader → in-memory vault tree
-│   │   │   │   ├── writer.ts          # In-memory vault tree → KDBX binary
-│   │   │   │   ├── header.ts          # Header parsing: magic, version, cipher, KDF params
-│   │   │   │   ├── payload.ts         # Block decryption, inner stream, XML deserialise
-│   │   │   │   ├── xml.ts             # KDBX XML ↔ entry/group model
-│   │   │   │   └── model.ts           # Entry, Group, Attachment, FieldRef typed classes
+│   │   │   ├── crypto/                # Bootstrapped from keewebx (§2.7); no platform-crypto
+│   │   │   │   │                      # indirection — calls globalThis.crypto.subtle directly,
+│   │   │   │   │                      # since the Node 24+ floor (§2.5) guarantees it unconditionally.
+│   │   │   │   ├── crypto-engine.ts   # sha256/sha512/hmacSha256/AesCbc/random + pluggable argon2()
+│   │   │   │   ├── chacha20.ts        # ChaCha20 stream cipher — wraps @stablelib/chacha (audited);
+│   │   │   │   │                      # keewebx's own hand-rolled implementation was swapped out
+│   │   │   │   ├── hmac-block-transform.ts  # Per-1MB-block HMAC-SHA256 authentication (§3.2 step 9)
+│   │   │   │   ├── key-encryptor-aes.ts     # AES-KDF key transform
+│   │   │   │   ├── key-encryptor-kdf.ts     # KDF dispatch: Argon2d / Argon2id / AES-KDF
+│   │   │   │   ├── protect-salt-generator.ts # ChaCha20-based inner-stream salt generator
+│   │   │   │   └── protected-value.ts       # XOR-in-memory protected-value wrapper (§11.1)
+│   │   │   ├── defs/
+│   │   │   │   ├── consts.ts          # Signatures, ErrorCodes, CipherId, KdfId, CrsAlgorithm, etc.
+│   │   │   │   └── xml-names.ts       # KDBX XML element/attribute name constants
+│   │   │   ├── errors/
+│   │   │   │   └── kdbx-error.ts      # KdbxError
+│   │   │   ├── kdbx/                  # Per-object-model split, adopted from keewebx (§2.7) instead
+│   │   │   │   │                      # of the pipeline-stage split (parser.ts/writer.ts/header.ts)
+│   │   │   │   │                      # originally sketched here — already proven, more maintainable.
+│   │   │   │   ├── kdbx.ts            # Top-level vault class: load/save orchestration, tree ops
+│   │   │   │   ├── kdbx-format.ts     # Binary read/write pipeline; explicitly rejects KDBX3 on
+│   │   │   │   │                      # both load() and save() (§3.2 step 2, §2.7 fix)
+│   │   │   │   ├── kdbx-header.ts     # Header parsing: magic, version, cipher, KDF params
+│   │   │   │   ├── kdbx-context.ts    # Per-operation context threaded through the format layer
+│   │   │   │   ├── kdbx-credentials.ts    # Master password / key file / challenge-response
+│   │   │   │   ├── kdbx-custom-data.ts    # Custom data map (meta + per-entry/group)
+│   │   │   │   ├── kdbx-deleted-object.ts # Deleted-object tombstone records
+│   │   │   │   ├── kdbx-entry.ts      # Entry model: fields, history, auto-type, attachments
+│   │   │   │   ├── kdbx-group.ts      # Group model: hierarchy, entries
+│   │   │   │   ├── kdbx-meta.ts       # Database meta: name, icons, recycle bin, memory protection
+│   │   │   │   ├── kdbx-times.ts      # Creation/modification/access timestamps
+│   │   │   │   └── kdbx-uuid.ts       # KDBX UUID type (16 bytes, base64-encoded)
+│   │   │   ├── utils/
+│   │   │   │   ├── binary-stream.ts   # Little-endian binary reader/writer over ArrayBuffer
+│   │   │   │   ├── byte-utils.ts      # Byte/base64/hex/UTF-8 conversion helpers
+│   │   │   │   ├── int64.ts           # 64-bit integer type (KDBX timestamps use this)
+│   │   │   │   ├── var-dictionary.ts  # KDBX's VarDictionary format (KDF param serialization)
+│   │   │   │   └── xml-utils.ts       # KDBX XML parse/serialize, protected-value XOR pass
 │   │   │   ├── auth/
 │   │   │   │   └── session-key.ts     # AES-KW wrap/unwrap of the session key, given VUK bytes
 │   │   │   ├── providers/
@@ -216,7 +239,7 @@ Rather than writing the KDBX4 parser/crypto/model layer from scratch, `@keetar/c
 
 **Mechanics:**
 - Plain copy, not a history-preserving `git subtree`/`filter-repo` merge — most of it gets restructured on import anyway (see below), so preserving blame history has little payoff here.
-- License obligation: MIT. Carry forward the attribution chain their own `package.json` already documents — Antelle (original `kdbxweb` author) → gynet/keewebx (this fork) → Keetar — in a `NOTICE` file and in `@keetar/core`'s `package.json` `contributors` field. Confirm an actual `LICENSE` file/text exists in the source repo before relying on it — only the `package.json` `"license": "MIT"` field was found during review, no `LICENSE` file at the repo root.
+- License obligation: MIT. Carry forward the attribution chain their own `package.json` already documents — Antelle (original `kdbxweb` author) → gynet/keewebx (this fork) → Keetar — in a `NOTICE` file and in `@keetar/core`'s `package.json` `contributors` field. Confirmed present: `packages/db/LICENSE` at the keewebx repo root (Copyright (C) 2021-2025 Antelle, MIT), consistent with the `package.json` `"license": "MIT"` field. Both are now carried forward in `@keetar/core`'s `NOTICE` and `package.json`.
 
 **What to pull in, in priority order:**
 
@@ -229,6 +252,11 @@ Rather than writing the KDBX4 parser/crypto/model layer from scratch, `@keetar/c
 **Fixes required on import — don't carry these bugs forward:**
 - **KDBX3 read-path gap:** their header parser still sets `MinSupportedVersion: 3`, and the KDBX3 inner-stream cipher (Salsa20) has no implementation (`CrsAlgorithm.Salsa20` is declared but unhandled in `protect-salt-generator.ts`) — so a KDBX3 file fails confusingly mid-decrypt instead of being rejected cleanly on open. Only their `save()` (write) path explicitly rejects it. Add the same explicit rejection to the read path per §3.2 step 2. Their own `test_db_kdbx3_with_chacha20_protected_fields.kdbx` fixture becomes our negative "reject cleanly" test case instead of a positive-support case.
 - **Twofish cipher:** their fixtures include `test_db_kdbx4_with_password_argon2_twofish.kdbx` — Twofish is a real KDBX4 cipher option §3.2 doesn't currently mention (it only lists AES-256/ChaCha20 as cipher UUID options). Decide whether to support it or explicitly reject it with a clear error — don't leave it unhandled by accident.
+
+**Bootstrap status (initial import):** Both fixes above were re-verified against the actual keewebx source at import time, not assumed from this document:
+- **KDBX3:** the read-path gap was real — `kdbx-header.ts`'s `readVersion()` had `MinSupportedVersion: 3`. Fixed by raising it to 4, so an unsupported version (including KDBX3) is now rejected in `KdbxHeader.read()` itself, before any downstream cipher-selection code runs — with a message naming the version found. Separately, `kdbx-format.ts`'s `load()`/`save()` *already* had their own explicit `versionMajor === 3` check with a clear "KDBX3 is not supported" message — apparently fixed upstream in keewebx after this document's original review. Both checks now exist; harmless redundancy, not a conflict.
+- **Twofish:** already cleanly rejected — `CipherId` in `defs/consts.ts` only defines `Aes`/`ChaCha20`, so an unrecognized cipher UUID (Twofish included) falls to the `default` case in `kdbx-format.ts`'s cipher dispatch and rejects with `ErrorCodes.Unsupported`. No support was added; decision was to keep it explicitly unsupported, matching §3.2's AES-256/ChaCha20-only cipher list.
+- **ChaCha20 implementation:** not listed as a required fix above, but discovered during bootstrap — keewebx's `chacha20.ts` is a hand-rolled implementation, not the `@stablelib/chacha` library §3.1 specifies for this security-critical module. Swapped it for a `@stablelib/chacha`-backed wrapper preserving the same class interface (`getBytes()`/`encrypt()`), so `protect-salt-generator.ts` and `crypto-engine.ts` needed no changes. Verified bit-identical output against the original implementation's own test vectors before and after the swap.
 
 **Leave behind:** `conf/`, `scripts/`, and all bun-specific build tooling/eslint config — `@keetar/core` uses its own pnpm/webpack/vitest setup per §2.4.
 
@@ -245,7 +273,7 @@ Use the Web Crypto API (via the platform-crypto interface, §2.5) for everything
 | Library | Purpose |
 |---|---|
 | `argon2-browser` | WASM build of the reference Argon2 implementation. Use the WASM variant (not the JS fallback) for timing correctness. Runs natively under Node's `WebAssembly` global for core's tests; loaded via `importScripts()` inside the service worker at runtime for MV3 CSP compliance (§11.4). |
-| `@stablelib/chacha20` | Pure JS ChaCha20. Used for the KDBX4 inner stream (protected field encryption). Small, audited, zero native deps. |
+| `@stablelib/chacha` | Pure JS ChaCha20 (package name is `@stablelib/chacha`, not `@stablelib/chacha20`). Used for the KDBX4 inner stream (protected field encryption) and payload cipher. Small, audited, zero native deps. |
 | `@xmldom/xmldom` | DOM-compliant XML parser for environments without a native `DOMParser` (service worker, Node tests). Required since KDBX's XML payload layer needs real DOM parsing, not just string handling. |
 | `tldts` | TLD-aware domain parsing for autofill matching. ~10KB. Handles `.co.uk`, `.com.au`, etc. Do not implement this yourself. |
 | `fflate` | DEFLATE compression/decompression for KDBX payload blocks. Smaller and faster than pako. |
@@ -835,7 +863,7 @@ Build in this exact order. Each phase has a testable stopping point. Do not star
 | **2** | Local-file backend + vault session (`@keetar/web`) | Open a real local `.kdbx` file via the File System Access API, decrypt, hold in memory, lock on idle timeout. Browser console or minimal UI only. |
 | **3** | Popup UI (read-only) | Show entry list, search, copy username/password to clipboard. No editing, no autofill yet. |
 | **4** | Autofill | Content script + domain matching + credential injection. Test manually on 10 real sites including Google and GitHub. |
-| **5** | Write path | `kdbx/writer.ts` — add, edit, delete entries, save back to the local file handle. **Critical:** output must open in KeePassXC desktop without errors. |
+| **5** | Write path | `kdbx-format.ts`'s `save()`/`saveV4()` (§2.7 — per-object-model split, not a separate `writer.ts`) — add, edit, delete entries, save back to the local file handle. **Critical:** output must open in KeePassXC desktop without errors. |
 | **6** | Manager UI | Full vault-content management surface (§8), post-unlock only: entry editing, group management, attachments, wired to the write path from Phase 5. |
 | **7** | Biometric unlock | WebAuthn PRF enrolment and unlock, folded into the same gesture as file-handle re-grant (§6.2). Requires real device testing — Touch ID, Windows Hello, and at least one FIDO2 hardware key. |
 | **8** | TOTP + health | TOTP generation + autofill, HIBP breach checking, password health report (weak, reused, old, breached). |
@@ -849,9 +877,9 @@ Build in this exact order. Each phase has a testable stopping point. Do not star
 
 | Package | Version | Rationale |
 |---|---|---|
-| `typescript` | latest | Strict typing across both packages — a stated primary goal (§1.1). All source files are `.ts`/`.tsx` (§2.4). |
-| `argon2-browser` | latest | WASM Argon2id — no in-browser alternative exists. Use WASM build, not JS fallback. |
-| `@stablelib/chacha20` | latest | ChaCha20 inner stream for KDBX4. Audited, minimal, TS types. |
+| `typescript` | `~5.9.0` in `@keetar/core` | Strict typing across both packages — a stated primary goal (§1.1). All source files are `.ts`/`.tsx` (§2.4). Initially pinned to `~5.6.0` to match the minor version keewebx's bootstrapped `crypto/`/`kdbx/` source (§2.7) was actually built and typechecked against, since TS 5.7+ made typed arrays generic over their buffer type (`Uint8Array<ArrayBuffer>` vs. the old bare `Uint8Array`), breaking structural compatibility throughout that code for no behavioral reason. Deliberately upgraded to `5.9.3` (latest of the mature JS-based compiler line — TS jumped straight from 5.9 to a `7.0` native Go rewrite, too fresh/unproven a jump to take alongside this work) and the ~80 resulting error sites fixed directly: pinned `Uint8Array`-returning helpers in `byte-utils.ts` to `Uint8Array<ArrayBuffer>`, widened a few pervasively-used signatures (`CryptoEngine`'s `BufferLike = ArrayBuffer \| Uint8Array<ArrayBuffer>` param type, `VarDictionaryAnyValue`) to match what their runtime code already accepted, and wrapped remaining call sites with the existing `arrayToBuffer()` helper. `CryptoEngine.random()` changed from returning `Uint8Array` to `ArrayBuffer` (its callers overwhelmingly wanted the latter; the few needing indexed byte access now wrap explicitly). Stay current with the 5.9.x line going forward; revisit TS 7 as its own deliberate, separately-verified upgrade once its toolchain ecosystem (vitest, ts-loader) is proven. |
+| `argon2-browser` | latest | WASM Argon2id — no in-browser alternative exists. Use WASM build, not JS fallback. Also used as `@keetar/core`'s test-only Argon2 implementation (§2.7), loaded directly against its low-level WASM `Module` rather than through its public `hash()` wrapper, which hardcodes Argon2 version 0x13 and only accepts UTF-8 string input — real KDBX4 files can specify version 0x10 and our composite key/salt are raw bytes. |
+| `@stablelib/chacha` | latest | ChaCha20 inner stream for KDBX4 (package name is `@stablelib/chacha`, not `@stablelib/chacha20` — see §3.1). Audited, minimal, TS types. Swapped in for keewebx's own hand-rolled ChaCha20 implementation during the §2.7 bootstrap. |
 | `@xmldom/xmldom` | latest | DOM-compliant XML parser for non-DOM environments (service worker, Node tests). See §3.1. |
 | `tldts` | latest | TLD-aware domain parsing. ~10KB. Required for correct base-domain matching across all public suffixes. |
 | `fflate` | latest | DEFLATE for KDBX payload blocks. ~8KB gzipped. Faster and smaller than pako. |

@@ -1,7 +1,7 @@
-import { base64ToBytes, bytesToBase64 } from '../utils/byte-utils';
-import { ErrorCodes } from '../defs/consts';
-import { KdbxError } from '../errors/kdbx-error';
-import * as CryptoEngine from '../crypto/crypto-engine';
+import { base64ToBytes, bytesToBase64 } from '../utils/byte-utils.js';
+import { ErrorCodes } from '../defs/consts.js';
+import { KdbxError } from '../errors/kdbx-error.js';
+import * as CryptoEngine from '../crypto/crypto-engine.js';
 
 const UuidLength = 16;
 const EmptyUuidStr = 'AAAAAAAAAAAAAAAAAAAAAA==';

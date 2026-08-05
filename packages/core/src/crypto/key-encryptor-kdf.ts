@@ -1,11 +1,11 @@
-import * as CryptoEngine from '../crypto/crypto-engine';
-import * as KeyEncryptorAes from './key-encryptor-aes';
-import { VarDictionary, VarDictionaryAnyValue } from '../utils/var-dictionary';
-import { KdbxError } from '../errors/kdbx-error';
-import { ErrorCodes, KdfId } from '../defs/consts';
-import { arrayToBuffer, bytesToBase64, zeroBuffer } from '../utils/byte-utils';
-import { Argon2Type } from './crypto-engine';
-import { Int64 } from '../utils/int64';
+import * as CryptoEngine from '../crypto/crypto-engine.js';
+import * as KeyEncryptorAes from './key-encryptor-aes.js';
+import { VarDictionary, VarDictionaryAnyValue } from '../utils/var-dictionary.js';
+import { KdbxError } from '../errors/kdbx-error.js';
+import { ErrorCodes, KdfId } from '../defs/consts.js';
+import { arrayToBuffer, bytesToBase64, zeroBuffer } from '../utils/byte-utils.js';
+import { Argon2Type } from './crypto-engine.js';
+import { Int64 } from '../utils/int64.js';
 
 export function encrypt(key: ArrayBuffer, kdfParams: VarDictionary): Promise<ArrayBuffer> {
     const uuid = kdfParams.get('$UUID');

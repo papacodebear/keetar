@@ -1,5 +1,5 @@
-import * as XmlUtils from './../utils/xml-utils';
-import { Kdbx } from './kdbx';
+import * as XmlUtils from './../utils/xml-utils.js';
+import { Kdbx } from './kdbx.js';
 
 export class KdbxContext {
     readonly kdbx: Kdbx;

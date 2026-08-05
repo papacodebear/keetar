@@ -1,5 +1,5 @@
-import * as CryptoEngine from './crypto-engine';
-import { arrayToBuffer, zeroBuffer } from '../utils/byte-utils';
+import * as CryptoEngine from './crypto-engine.js';
+import { arrayToBuffer, zeroBuffer } from '../utils/byte-utils.js';
 
 const maxRoundsPreIteration = 10000;
 const aesBlockSize = 16;

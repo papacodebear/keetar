@@ -1,15 +1,15 @@
-import * as XmlNames from './../defs/xml-names';
-import * as XmlUtils from './../utils/xml-utils';
-import { KdbxTimes } from './kdbx-times';
-import { AutoTypeObfuscationOptions, Icons } from '../defs/consts';
-import { ProtectedValue } from '../crypto/protected-value';
-import { KdbxCustomData, KdbxCustomDataMap } from './kdbx-custom-data';
-import { KdbxUuid } from './kdbx-uuid';
-import { KdbxContext } from './kdbx-context';
-import { KdbxBinaries, KdbxBinary, KdbxBinaryOrRef, KdbxBinaryWithHash } from './kdbx-binaries';
-import { KdbxMeta } from './kdbx-meta';
-import { KdbxGroup } from './kdbx-group';
-import { MergeObjectMap } from './kdbx';
+import * as XmlNames from './../defs/xml-names.js';
+import * as XmlUtils from './../utils/xml-utils.js';
+import { KdbxTimes } from './kdbx-times.js';
+import { AutoTypeObfuscationOptions, Icons } from '../defs/consts.js';
+import { ProtectedValue } from '../crypto/protected-value.js';
+import { KdbxCustomData, KdbxCustomDataMap } from './kdbx-custom-data.js';
+import { KdbxUuid } from './kdbx-uuid.js';
+import { KdbxContext } from './kdbx-context.js';
+import { KdbxBinaries, KdbxBinary, KdbxBinaryOrRef, KdbxBinaryWithHash } from './kdbx-binaries.js';
+import { KdbxMeta } from './kdbx-meta.js';
+import { KdbxGroup } from './kdbx-group.js';
+import { MergeObjectMap } from './kdbx.js';
 
 export type KdbxEntryField = string | ProtectedValue;
 

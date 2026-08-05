@@ -1,8 +1,8 @@
-import { KdbxError } from '../errors/kdbx-error';
-import { ErrorCodes } from '../defs/consts';
-import { arrayToBuffer, bytesToString, stringToBytes } from './byte-utils';
-import { Int64 } from './int64';
-import { BinaryStream } from './binary-stream';
+import { KdbxError } from '../errors/kdbx-error.js';
+import { ErrorCodes } from '../defs/consts.js';
+import { arrayToBuffer, bytesToString, stringToBytes } from './byte-utils.js';
+import { Int64 } from './int64.js';
+import { BinaryStream } from './binary-stream.js';
 
 const MaxSupportedVersion = 1;
 const DefaultVersion = 0x0100;

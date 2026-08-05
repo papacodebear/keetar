@@ -1,17 +1,17 @@
-import * as XmlNames from '../defs/xml-names';
-import * as XmlUtils from './../utils/xml-utils';
-import { KdbxBinaries, KdbxBinary, KdbxBinaryWithHash } from './kdbx-binaries';
-import { KdbxDeletedObject } from './kdbx-deleted-object';
-import { KdbxGroup } from './kdbx-group';
-import { KdbxMeta, KdbxMetaEditState } from './kdbx-meta';
-import { KdbxCredentials } from './kdbx-credentials';
-import { KdbxHeader } from './kdbx-header';
-import { KdbxError } from '../errors/kdbx-error';
-import { Defaults, ErrorCodes, Icons } from '../defs/consts';
-import { KdbxFormat } from './kdbx-format';
-import { KdbxEntry, KdbxEntryEditState } from './kdbx-entry';
-import { KdbxUuid } from './kdbx-uuid';
-import { KdbxContext } from './kdbx-context';
+import * as XmlNames from '../defs/xml-names.js';
+import * as XmlUtils from './../utils/xml-utils.js';
+import { KdbxBinaries, KdbxBinary, KdbxBinaryWithHash } from './kdbx-binaries.js';
+import { KdbxDeletedObject } from './kdbx-deleted-object.js';
+import { KdbxGroup } from './kdbx-group.js';
+import { KdbxMeta, KdbxMetaEditState } from './kdbx-meta.js';
+import { KdbxCredentials } from './kdbx-credentials.js';
+import { KdbxHeader } from './kdbx-header.js';
+import { KdbxError } from '../errors/kdbx-error.js';
+import { Defaults, ErrorCodes, Icons } from '../defs/consts.js';
+import { KdbxFormat } from './kdbx-format.js';
+import { KdbxEntry, KdbxEntryEditState } from './kdbx-entry.js';
+import { KdbxUuid } from './kdbx-uuid.js';
+import { KdbxContext } from './kdbx-context.js';
 
 export interface KdbxEditState {
     entries?: { [name: string]: KdbxEntryEditState };

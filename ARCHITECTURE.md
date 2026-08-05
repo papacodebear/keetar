@@ -168,7 +168,8 @@ keetar/
 │       │   │   ├── index.ts           # Entry point — registers listeners, initialises session
 │       │   │   ├── vault-session.ts   # In-memory decrypted vault state + lock logic
 │       │   │   ├── keepalive.ts       # Chrome MV3 service worker keepalive (alarm ping)
-│       │   │   └── message-bus.ts     # Typed message router between popup/manager/content/background
+│       │   │   ├── message-bus.ts     # Typed message router between popup/manager/content/background
+│       │   │   └── argon2-wasm.ts     # Wires argon2-browser's WASM Module into CryptoEngine (§3.1, §11.4)
 │       │   ├── providers/
 │       │   │   ├── local-file.ts      # File System Access API — near-term primary backend
 │       │   │   ├── opfs-cache.ts      # OPFS — cache layer for cloud-backed vaults (deferred use)
@@ -195,10 +196,14 @@ keetar/
 │       ├── manifests/
 │       │   ├── manifest.chrome.json   # MV3
 │       │   └── manifest.firefox.json  # MV2 (MV3 target added in Phase 11)
-│       ├── wasm/
-│       │   └── argon2/                # argon2-browser pre-built WASM bundle (do not modify)
 │       ├── build/
-│       │   └── webpack.config.js
+│       │   └── webpack.config.js      # copies argon2-browser's dist/argon2.{js,wasm} from
+│       │                              # node_modules into dist/<target>/wasm/argon2/ at build
+│       │                              # time (§10.1) — not vendored in the source tree. A
+│       │                              # vendored copy could silently drift from whatever
+│       │                              # version package.json/pnpm-lock.yaml actually pin;
+│       │                              # copying from the resolved dependency at build time
+│       │                              # can't.
 │       ├── tests/
 │       ├── package.json               # @keetar/web
 │       └── tsconfig.json
@@ -223,7 +228,7 @@ keetar/
 
 **Storage contract:** `providers/file-provider.ts` exports the `FileProvider` interface as a type only (§7.1). Other consumers of `@keetar/core` — a Node CLI, a future desktop app — can implement it against their own storage without pulling in any extension code.
 
-**Crypto abstraction boundary:** `engine.ts`, `aes.ts`, `hmac.ts`, and `random.ts` depend on a small `platform-crypto.ts` interface (webcrypto-shaped: `subtle.encrypt/decrypt/digest/importKey`, `getRandomValues`) rather than importing `crypto.subtle` directly. `@keetar/web` supplies the browser's native `crypto.subtle`; tests run against Node's built-in `globalThis.crypto`. This keeps core's dependency surface explicit and keeps the same code path exercised in both environments.
+**Crypto abstraction boundary:** superseded by §2.7's bootstrap — `crypto-engine.ts` calls `globalThis.crypto.subtle` directly rather than through an injected `platform-crypto.ts` interface (keewebx's own pattern, adopted as-is per §2.7 point 5). No indirection needed: the Node 24+ floor above guarantees `globalThis.crypto.subtle` unconditionally, so the same code path — no browser-vs-Node branch — runs in both `@keetar/web` and core's Node test suite.
 
 **Node floor: 24+.** `globalThis.crypto.subtle` has been available since Node 19, so no polyfill is needed at any currently-maintained LTS — 24 is chosen for support-policy freshness, not a capability gap. It's the current Active LTS (EOL 2028-04-30), giving the longest runway of any maintained line before this needs revisiting. Node 22 (Maintenance LTS, EOL 2027-04-30) and Node 20 (EOL 2026-04-30, already past) were both considered; Node 18 (EOL 2025-04-30) was rejected outright as already dead for over a year. Set `"engines": { "node": ">=24" }` in both packages' `package.json` (§2.4).
 
@@ -375,13 +380,15 @@ Everything stored here is either encrypted or non-sensitive metadata. The extens
 
 #### Mechanism
 
-The user selects a file via a picker dialog (`showOpenFilePicker()`). The extension receives a `FileSystemFileHandle` that supports read and write. The handle is serialized and stored in `chrome.storage.local` (not OPFS — the handle is a reference, not vault content):
+The user selects a file via a picker dialog (`showOpenFilePicker()`). The extension receives a `FileSystemFileHandle` that supports read and write. The handle is persisted in **IndexedDB**, not OPFS (the handle is a reference, not vault content) and not `chrome.storage.local` as earlier drafts of this doc said — `chrome.storage.local` only accepts JSON-serializable values, and `FileSystemFileHandle` isn't one. IndexedDB supports it via the structured clone algorithm, and is reachable from both extension pages and the service worker (same origin), so either can read back a handle the other stored:
 
 ```
-chrome.storage.local: { "fileHandle-<uuid>": <serialized FileSystemFileHandle> }
+IndexedDB "keetar-file-handles" / store "handles": { "<uuid>": FileSystemFileHandle }
 ```
 
-Reusing a stored handle requires calling `handle.requestPermission()` — this needs a user gesture but not re-navigating the file picker.
+`showOpenFilePicker()` itself can only be called from a document with active user activation — a service worker has no window and cannot show it. §4.1's `SHA-256(provider + ":" + filePath)` UUID derivation also doesn't apply to this backend specifically: the File System Access API deliberately exposes no stable "path", only the sandboxed handle and its bare (non-unique) filename. This backend instead mints a fresh random UUID at pick time and persists the `{uuid -> handle}` association directly — the namespacing *intent* behind §4.1 still holds, just via a different derivation for this one backend.
+
+Reusing a stored handle requires calling `handle.requestPermission()` — this needs a user gesture but not re-navigating the file picker. In practice this only reintroduces a prompt after permission has actually lapsed (browser restart, §4.2 below); within a session, a handle already granted resolves without one, so the service worker can call this freely once a page has completed the initial grant.
 
 #### Permission Persistence Behavior
 
@@ -756,7 +763,7 @@ Additionally, the popup sends a ping message to background every 20s while open.
 | `manager.js` | `src/ui/manager/App.tsx` | Extension tab (full page), post-unlock only |
 | `options.js` | `src/ui/options/App.tsx` | Full options page, reachable pre-unlock |
 
-`@keetar/core` is a normal workspace dependency of `@keetar/web`, not a separate bundle. Build targets: `packages/web/dist/chrome/` and `packages/web/dist/firefox/`. WASM files (`wasm/argon2/`) copy verbatim to dist — do not bundle them.
+`@keetar/core` is a normal workspace dependency of `@keetar/web`, not a separate bundle. Build targets: `packages/web/dist/chrome/` and `packages/web/dist/firefox/`. WASM files copy verbatim to `dist/<target>/wasm/argon2/` — do not bundle them. Copied from the `argon2-browser` dependency's own `dist/argon2.{js,wasm}` in `node_modules` at build time, not from a vendored copy in the source tree (§2.4) — see the `webpack.config.js` note there for why.
 
 > ⚠️ Never include source maps in production builds. They expose implementation structure.
 
@@ -860,7 +867,7 @@ Build in this exact order. Each phase has a testable stopping point. Do not star
 | Phase | Focus | Completion criteria |
 |---|---|---|
 | **1** | Crypto engine + KDBX parser (`@keetar/core`) | `crypto/` and `kdbx/` pass all official KeePass test vectors, in Node, no browser. Test harness only. |
-| **2** | Local-file backend + vault session (`@keetar/web`) | Open a real local `.kdbx` file via the File System Access API, decrypt, hold in memory, lock on idle timeout. Browser console or minimal UI only. |
+| **2** | Local-file backend + vault session (`@keetar/web`) | Open a real local `.kdbx` file via the File System Access API, decrypt, hold in memory, lock on idle timeout. Browser console or minimal UI only — in practice this still needs *some* page: `showOpenFilePicker()` requires an active document with a user gesture, which a service worker doesn't have. `src/dev-harness/` fills that gap (file-picker button + password field + unlock/lock buttons, messaging the background service worker) — it is explicitly not one of §8.1's three real UI surfaces and should be deleted once Popup (Phase 3) and Options exist for real. |
 | **3** | Popup UI (read-only) | Show entry list, search, copy username/password to clipboard. No editing, no autofill yet. |
 | **4** | Autofill | Content script + domain matching + credential injection. Test manually on 10 real sites including Google and GitHub. |
 | **5** | Write path | `kdbx-format.ts`'s `save()`/`saveV4()` (§2.7 — per-object-model split, not a separate `writer.ts`) — add, edit, delete entries, save back to the local file handle. **Critical:** output must open in KeePassXC desktop without errors. |
@@ -878,14 +885,17 @@ Build in this exact order. Each phase has a testable stopping point. Do not star
 | Package | Version | Rationale |
 |---|---|---|
 | `typescript` | `~5.9.0` in `@keetar/core` | Strict typing across both packages — a stated primary goal (§1.1). All source files are `.ts`/`.tsx` (§2.4). Initially pinned to `~5.6.0` to match the minor version keewebx's bootstrapped `crypto/`/`kdbx/` source (§2.7) was actually built and typechecked against, since TS 5.7+ made typed arrays generic over their buffer type (`Uint8Array<ArrayBuffer>` vs. the old bare `Uint8Array`), breaking structural compatibility throughout that code for no behavioral reason. Deliberately upgraded to `5.9.3` (latest of the mature JS-based compiler line — TS jumped straight from 5.9 to a `7.0` native Go rewrite, too fresh/unproven a jump to take alongside this work) and the ~80 resulting error sites fixed directly: pinned `Uint8Array`-returning helpers in `byte-utils.ts` to `Uint8Array<ArrayBuffer>`, widened a few pervasively-used signatures (`CryptoEngine`'s `BufferLike = ArrayBuffer \| Uint8Array<ArrayBuffer>` param type, `VarDictionaryAnyValue`) to match what their runtime code already accepted, and wrapped remaining call sites with the existing `arrayToBuffer()` helper. `CryptoEngine.random()` changed from returning `Uint8Array` to `ArrayBuffer` (its callers overwhelmingly wanted the latter; the few needing indexed byte access now wrap explicitly). Stay current with the 5.9.x line going forward; revisit TS 7 as its own deliberate, separately-verified upgrade once its toolchain ecosystem (vitest, ts-loader) is proven. |
-| `argon2-browser` | latest | WASM Argon2id — no in-browser alternative exists. Use WASM build, not JS fallback. Also used as `@keetar/core`'s test-only Argon2 implementation (§2.7), loaded directly against its low-level WASM `Module` rather than through its public `hash()` wrapper, which hardcodes Argon2 version 0x13 and only accepts UTF-8 string input — real KDBX4 files can specify version 0x10 and our composite key/salt are raw bytes. |
+| `argon2-browser` | latest | WASM Argon2id — no in-browser alternative exists. Use WASM build, not JS fallback. Loaded directly against its low-level WASM `Module` rather than through its public `hash()` wrapper in both places it's used, not just one: `@keetar/core`'s test-only Argon2 implementation (§2.7) via Node's `createRequire`, and `@keetar/web`'s real runtime implementation (`background/argon2-wasm.ts`) via `importScripts()` (§3.1, §11.4) — the public wrapper hardcodes Argon2 version 0x13 and only accepts UTF-8 string input, but real KDBX4 files can specify version 0x10 and our composite key/salt are raw bytes. |
 | `@stablelib/chacha` | latest | ChaCha20 inner stream for KDBX4 (package name is `@stablelib/chacha`, not `@stablelib/chacha20` — see §3.1). Audited, minimal, TS types. Swapped in for keewebx's own hand-rolled ChaCha20 implementation during the §2.7 bootstrap. |
 | `@xmldom/xmldom` | latest | DOM-compliant XML parser for non-DOM environments (service worker, Node tests). See §3.1. |
 | `tldts` | latest | TLD-aware domain parsing. ~10KB. Required for correct base-domain matching across all public suffixes. |
 | `fflate` | latest | DEFLATE for KDBX payload blocks. ~8KB gzipped. Faster and smaller than pako. |
 | `react` + `react-dom` | 18.x | Popup, manager, and options UI only. Not loaded in background or content scripts. |
 | `zxcvbn` | latest | Password strength estimation — same library KeePassXC uses. Load lazily in generator UI only. |
-| `webpack` + `babel` | latest | Build tooling (`@keetar/web`), compiling TypeScript via `babel-preset-typescript`/`ts-loader`. Not bundled into extension output. |
+| `webpack` + `ts-loader` | latest | Build tooling (`@keetar/web`). `ts-loader` alone compiles TypeScript directly (typechecked, via the real `tsc` program) — no `babel-preset-typescript` needed on top of it. Two separate webpack configs, not one multi-entry config: the service worker bundle (`target: 'webworker'`) and extension-page bundles (`target: 'web'`) need incompatible globals (no `document` in the former, no worker-only APIs assumed in the latter), and webpack's `target` is config-wide, not per-entry. Not bundled into extension output. |
+| `copy-webpack-plugin` | latest | Copies `manifests/*.json` → `manifest.json`, `argon2-browser`'s `dist/argon2.{js,wasm}` from `node_modules` → `wasm/argon2/` (§10.1 — WASM files copy verbatim, never bundled, and not vendored in the source tree — §2.4), and extension-page HTML into each build target's output directory. |
+| `@types/chrome` | latest | Ambient types for `chrome.*` APIs (storage, idle, alarms, runtime). |
+| `@types/wicg-file-system-access` | latest | Ambient types for the File System Access API (`showOpenFilePicker`, `FileSystemFileHandle`, `queryPermission`/`requestPermission`) — not yet part of TypeScript's bundled DOM lib. |
 | `vitest` | latest | Unit testing across both packages. Not bundled into extension output. |
 
 > ⚠️ **Rule for adding any new dependency:** audit it for network requests at import time. Any dependency that phones home at load is disqualifying. All network activity in this extension must be explicit and user-initiated.

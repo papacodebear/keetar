@@ -1,23 +1,23 @@
 import { gzipSync, gunzipSync } from 'fflate';
-import { Kdbx } from './kdbx';
-import { CipherId, CompressionAlgorithm, ErrorCodes } from '../defs/consts';
-import { KdbxError } from '../errors/kdbx-error';
-import { BinaryStream } from '../utils/binary-stream';
-import { KdbxContext } from './kdbx-context';
-import { KdbxHeader } from './kdbx-header';
+import { Kdbx } from './kdbx.js';
+import { CipherId, CompressionAlgorithm, ErrorCodes } from '../defs/consts.js';
+import { KdbxError } from '../errors/kdbx-error.js';
+import { BinaryStream } from '../utils/binary-stream.js';
+import { KdbxContext } from './kdbx-context.js';
+import { KdbxHeader } from './kdbx-header.js';
 import {
     arrayBufferEquals,
     arrayToBuffer,
     bytesToString,
     stringToBytes,
     zeroBuffer
-} from '../utils/byte-utils';
-import { ProtectSaltGenerator } from '../crypto/protect-salt-generator';
-import * as XmlUtils from '../utils/xml-utils';
-import * as HmacBlockTransform from '../crypto/hmac-block-transform';
-import * as CryptoEngine from '../crypto/crypto-engine';
-import * as KeyEncryptorKdf from '../crypto/key-encryptor-kdf';
-import { Int64 } from '../utils/int64';
+} from '../utils/byte-utils.js';
+import { ProtectSaltGenerator } from '../crypto/protect-salt-generator.js';
+import * as XmlUtils from '../utils/xml-utils.js';
+import * as HmacBlockTransform from '../crypto/hmac-block-transform.js';
+import * as CryptoEngine from '../crypto/crypto-engine.js';
+import * as KeyEncryptorKdf from '../crypto/key-encryptor-kdf.js';
+import { Int64 } from '../utils/int64.js';
 
 export class KdbxFormat {
     readonly kdbx: Kdbx;

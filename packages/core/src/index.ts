@@ -1,34 +1,34 @@
-import { ChaCha20 } from './crypto/chacha20';
-import * as CryptoEngine from './crypto/crypto-engine';
-import * as HmacBlockTransform from './crypto/hmac-block-transform';
-import * as KeyEncryptorKdf from './crypto/key-encryptor-kdf';
-import { ProtectSaltGenerator } from './crypto/protect-salt-generator';
-import { ProtectedValue } from './crypto/protected-value';
+import { ChaCha20 } from './crypto/chacha20.js';
+import * as CryptoEngine from './crypto/crypto-engine.js';
+import * as HmacBlockTransform from './crypto/hmac-block-transform.js';
+import * as KeyEncryptorKdf from './crypto/key-encryptor-kdf.js';
+import { ProtectSaltGenerator } from './crypto/protect-salt-generator.js';
+import { ProtectedValue } from './crypto/protected-value.js';
 
-import * as Consts from './defs/consts';
-import * as XmlNames from './defs/xml-names';
+import * as Consts from './defs/consts.js';
+import * as XmlNames from './defs/xml-names.js';
 
-import { KdbxError } from './errors/kdbx-error';
+import { KdbxError } from './errors/kdbx-error.js';
 
-import { Kdbx } from './kdbx/kdbx';
-import { KdbxBinaries } from './kdbx/kdbx-binaries';
-import { KdbxContext } from './kdbx/kdbx-context';
-import { KdbxCredentials } from './kdbx/kdbx-credentials';
-import { KdbxCustomData } from './kdbx/kdbx-custom-data';
-import { KdbxDeletedObject } from './kdbx/kdbx-deleted-object';
-import { KdbxEntry } from './kdbx/kdbx-entry';
-import { KdbxFormat } from './kdbx/kdbx-format';
-import { KdbxGroup } from './kdbx/kdbx-group';
-import { KdbxHeader } from './kdbx/kdbx-header';
-import { KdbxMeta } from './kdbx/kdbx-meta';
-import { KdbxTimes } from './kdbx/kdbx-times';
-import { KdbxUuid } from './kdbx/kdbx-uuid';
+import { Kdbx } from './kdbx/kdbx.js';
+import { KdbxBinaries } from './kdbx/kdbx-binaries.js';
+import { KdbxContext } from './kdbx/kdbx-context.js';
+import { KdbxCredentials } from './kdbx/kdbx-credentials.js';
+import { KdbxCustomData } from './kdbx/kdbx-custom-data.js';
+import { KdbxDeletedObject } from './kdbx/kdbx-deleted-object.js';
+import { KdbxEntry } from './kdbx/kdbx-entry.js';
+import { KdbxFormat } from './kdbx/kdbx-format.js';
+import { KdbxGroup } from './kdbx/kdbx-group.js';
+import { KdbxHeader } from './kdbx/kdbx-header.js';
+import { KdbxMeta } from './kdbx/kdbx-meta.js';
+import { KdbxTimes } from './kdbx/kdbx-times.js';
+import { KdbxUuid } from './kdbx/kdbx-uuid.js';
 
-import { BinaryStream } from './utils/binary-stream';
-import * as ByteUtils from './utils/byte-utils';
-import { Int64 } from './utils/int64';
-import { VarDictionary } from './utils/var-dictionary';
-import * as XmlUtils from './utils/xml-utils';
+import { BinaryStream } from './utils/binary-stream.js';
+import * as ByteUtils from './utils/byte-utils.js';
+import { Int64 } from './utils/int64.js';
+import { VarDictionary } from './utils/var-dictionary.js';
+import * as XmlUtils from './utils/xml-utils.js';
 
 export {
     ChaCha20,
@@ -61,7 +61,7 @@ export {
     XmlUtils
 };
 
-export type { KdbxEditState } from './kdbx/kdbx';
+export type { KdbxEditState } from './kdbx/kdbx.js';
 export type {
     KdbxBinary,
     KdbxBinaryIn,
@@ -69,17 +69,18 @@ export type {
     KdbxBinaryRef,
     KdbxBinaryRefWithValue,
     KdbxBinaryWithHash
-} from './kdbx/kdbx-binaries';
-export type { KdbxChallengeResponseFn } from './kdbx/kdbx-credentials';
-export type { KdbxCustomDataMap, KdbxCustomDataItem } from './kdbx/kdbx-custom-data';
+} from './kdbx/kdbx-binaries.js';
+export type { KdbxChallengeResponseFn } from './kdbx/kdbx-credentials.js';
+export type { KdbxCustomDataMap, KdbxCustomDataItem } from './kdbx/kdbx-custom-data.js';
 export type {
     KdbxAutoTypeItem,
     KdbxEntryAutoType,
     KdbxEntryEditState,
     KdbxEntryField
-} from './kdbx/kdbx-entry';
+} from './kdbx/kdbx-entry.js';
 export type {
     KdbxMemoryProtection,
     KdbxMetaEditState,
     KdbxCustomIcon
-} from './kdbx/kdbx-meta';
+} from './kdbx/kdbx-meta.js';
+export type { FileProvider, FileMetadata, FileListing } from './providers/file-provider.js';

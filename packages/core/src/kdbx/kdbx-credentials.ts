@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import * as XmlUtils from '../utils/xml-utils';
-import * as CryptoEngine from '../crypto/crypto-engine';
-import { ProtectedValue } from '../crypto/protected-value';
-import { KdbxError } from '../errors/kdbx-error';
-import { ErrorCodes } from '../defs/consts';
+import * as XmlUtils from '../utils/xml-utils.js';
+import * as CryptoEngine from '../crypto/crypto-engine.js';
+import { ProtectedValue } from '../crypto/protected-value.js';
+import { KdbxError } from '../errors/kdbx-error.js';
+import { ErrorCodes } from '../defs/consts.js';
 import {
     arrayToBuffer,
     base64ToBytes,
@@ -13,7 +13,7 @@ import {
     hexToBytes,
     stringToBytes,
     zeroBuffer
-} from '../utils/byte-utils';
+} from '../utils/byte-utils.js';
 
 export type KdbxChallengeResponseFn = (challenge: ArrayBuffer) => Promise<ArrayBuffer | Uint8Array>;
 

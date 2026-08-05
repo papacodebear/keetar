@@ -1,8 +1,8 @@
-import { ChaCha20 } from './chacha20';
-import { arrayToBuffer } from '../utils/byte-utils';
-import { CrsAlgorithm, ErrorCodes } from '../defs/consts';
-import { KdbxError } from '../errors/kdbx-error';
-import * as CryptoEngine from '../crypto/crypto-engine';
+import { ChaCha20 } from './chacha20.js';
+import { arrayToBuffer } from '../utils/byte-utils.js';
+import { CrsAlgorithm, ErrorCodes } from '../defs/consts.js';
+import { KdbxError } from '../errors/kdbx-error.js';
+import * as CryptoEngine from '../crypto/crypto-engine.js';
 
 /**
  * Protect information used for decrypt and encrypt protected data fields

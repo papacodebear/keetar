@@ -1,12 +1,12 @@
-import { KdbxUuid } from './kdbx-uuid';
-import * as XmlUtils from '../utils/xml-utils';
-import * as XmlNames from '../defs/xml-names';
-import { KdbxCustomData, KdbxCustomDataItem, KdbxCustomDataMap } from './kdbx-custom-data';
-import { KdbxContext } from './kdbx-context';
-import { KdbxError } from '../errors/kdbx-error';
-import { Defaults, ErrorCodes } from '../defs/consts';
-import { MergeObjectMap } from './kdbx';
-import { KdbxBinaries } from './kdbx-binaries';
+import { KdbxUuid } from './kdbx-uuid.js';
+import * as XmlUtils from '../utils/xml-utils.js';
+import * as XmlNames from '../defs/xml-names.js';
+import { KdbxCustomData, KdbxCustomDataItem, KdbxCustomDataMap } from './kdbx-custom-data.js';
+import { KdbxContext } from './kdbx-context.js';
+import { KdbxError } from '../errors/kdbx-error.js';
+import { Defaults, ErrorCodes } from '../defs/consts.js';
+import { MergeObjectMap } from './kdbx.js';
+import { KdbxBinaries } from './kdbx-binaries.js';
 
 const MetaConst = {
     Generator: 'KdbxWeb'

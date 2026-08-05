@@ -1,6 +1,6 @@
-import * as CryptoEngine from './../crypto/crypto-engine';
-import { ProtectedValue } from '../crypto/protected-value';
-import { arrayToBuffer, bytesToHex } from '../utils/byte-utils';
+import * as CryptoEngine from './../crypto/crypto-engine.js';
+import { ProtectedValue } from '../crypto/protected-value.js';
+import { arrayToBuffer, bytesToHex } from '../utils/byte-utils.js';
 
 export type KdbxBinaryRef = { ref: string };
 export type KdbxBinaryRefWithValue = { ref: string; value: KdbxBinary };

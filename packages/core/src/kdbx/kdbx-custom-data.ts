@@ -1,6 +1,6 @@
-import * as XmlUtils from '../utils/xml-utils';
-import * as XmlNames from '../defs/xml-names';
-import { KdbxContext } from './kdbx-context';
+import * as XmlUtils from '../utils/xml-utils.js';
+import * as XmlNames from '../defs/xml-names.js';
+import { KdbxContext } from './kdbx-context.js';
 
 export type KdbxCustomDataItem = { value: string | undefined; lastModified?: Date | undefined };
 

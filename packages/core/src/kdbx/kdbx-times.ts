@@ -1,6 +1,6 @@
-import * as XmlNames from './../defs/xml-names';
-import * as XmlUtils from './../utils/xml-utils';
-import { KdbxContext } from './kdbx-context';
+import * as XmlNames from './../defs/xml-names.js';
+import * as XmlUtils from './../utils/xml-utils.js';
+import { KdbxContext } from './kdbx-context.js';
 
 export class KdbxTimes {
     creationTime: Date | undefined;

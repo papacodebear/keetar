@@ -1,7 +1,7 @@
-import * as XmlUtils from '../utils/xml-utils';
-import * as XmlNames from '../defs/xml-names';
-import { KdbxUuid } from './kdbx-uuid';
-import { KdbxContext } from './kdbx-context';
+import * as XmlUtils from '../utils/xml-utils.js';
+import * as XmlNames from '../defs/xml-names.js';
+import { KdbxUuid } from './kdbx-uuid.js';
+import { KdbxContext } from './kdbx-context.js';
 
 export class KdbxDeletedObject {
     uuid: KdbxUuid | undefined;

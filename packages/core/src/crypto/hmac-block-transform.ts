@@ -1,9 +1,9 @@
-import { Int64 } from '../utils/int64';
-import { arrayBufferEquals, arrayToBuffer, zeroBuffer } from '../utils/byte-utils';
-import * as CryptoEngine from '../crypto/crypto-engine';
-import { BinaryStream } from '../utils/binary-stream';
-import { KdbxError } from '../errors/kdbx-error';
-import { ErrorCodes } from '../defs/consts';
+import { Int64 } from '../utils/int64.js';
+import { arrayBufferEquals, arrayToBuffer, zeroBuffer } from '../utils/byte-utils.js';
+import * as CryptoEngine from '../crypto/crypto-engine.js';
+import { BinaryStream } from '../utils/binary-stream.js';
+import { KdbxError } from '../errors/kdbx-error.js';
+import { ErrorCodes } from '../defs/consts.js';
 
 const BlockSize = 1024 * 1024;
 

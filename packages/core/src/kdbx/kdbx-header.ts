@@ -9,16 +9,16 @@ import {
     ErrorCodes,
     KdfId,
     Signatures
-} from '../defs/consts';
-import { KdbxUuid } from './kdbx-uuid';
-import { ValueType, VarDictionary } from '../utils/var-dictionary';
-import { BinaryStream } from '../utils/binary-stream';
-import { KdbxError } from '../errors/kdbx-error';
-import { base64ToBytes, zeroBuffer } from '../utils/byte-utils';
-import * as CryptoEngine from '../crypto/crypto-engine';
-import { Int64 } from '../utils/int64';
-import { KdbxContext } from './kdbx-context';
-import { ProtectedValue } from '../crypto/protected-value';
+} from '../defs/consts.js';
+import { KdbxUuid } from './kdbx-uuid.js';
+import { ValueType, VarDictionary } from '../utils/var-dictionary.js';
+import { BinaryStream } from '../utils/binary-stream.js';
+import { KdbxError } from '../errors/kdbx-error.js';
+import { base64ToBytes, zeroBuffer } from '../utils/byte-utils.js';
+import * as CryptoEngine from '../crypto/crypto-engine.js';
+import { Int64 } from '../utils/int64.js';
+import { KdbxContext } from './kdbx-context.js';
+import { ProtectedValue } from '../crypto/protected-value.js';
 
 interface HeaderField {
     name: string;

@@ -1,13 +1,13 @@
 import { gunzipSync } from 'fflate';
-import { KdbxError } from '../errors/kdbx-error';
-import { ErrorCodes } from '../defs/consts';
-import * as XmlNames from '../defs/xml-names';
-import { arrayToBuffer, base64ToBytes, bytesToBase64 } from './byte-utils';
-import { Int64 } from './int64';
-import { KdbxUuid } from '../kdbx/kdbx-uuid';
-import { ProtectedValue } from '../crypto/protected-value';
-import { ProtectSaltGenerator } from '../crypto/protect-salt-generator';
-import { KdbxBinaries, KdbxBinaryOrRef } from '../kdbx/kdbx-binaries';
+import { KdbxError } from '../errors/kdbx-error.js';
+import { ErrorCodes } from '../defs/consts.js';
+import * as XmlNames from '../defs/xml-names.js';
+import { arrayToBuffer, base64ToBytes, bytesToBase64 } from './byte-utils.js';
+import { Int64 } from './int64.js';
+import { KdbxUuid } from '../kdbx/kdbx-uuid.js';
+import { ProtectedValue } from '../crypto/protected-value.js';
+import { ProtectSaltGenerator } from '../crypto/protect-salt-generator.js';
+import { KdbxBinaries, KdbxBinaryOrRef } from '../kdbx/kdbx-binaries.js';
 
 const DateRegex = /\.\d\d\d/;
 const EpochSeconds = 62135596800;

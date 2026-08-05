@@ -1,7 +1,7 @@
-import { KdbxError } from '../errors/kdbx-error';
-import { ErrorCodes } from '../defs/consts';
-import { arrayToBuffer, hexToBytes } from '../utils/byte-utils';
-import { ChaCha20 } from './chacha20';
+import { KdbxError } from '../errors/kdbx-error.js';
+import { ErrorCodes } from '../defs/consts.js';
+import { arrayToBuffer, hexToBytes } from '../utils/byte-utils.js';
+import { ChaCha20 } from './chacha20.js';
 
 const EmptySha256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 const EmptySha512 =

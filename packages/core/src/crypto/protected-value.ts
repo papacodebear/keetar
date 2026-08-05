@@ -1,4 +1,4 @@
-import * as CryptoEngine from './crypto-engine';
+import * as CryptoEngine from './crypto-engine.js';
 import {
     arrayToBuffer,
     base64ToBytes,
@@ -6,7 +6,7 @@ import {
     bytesToString,
     stringToBytes,
     zeroBuffer
-} from '../utils/byte-utils';
+} from '../utils/byte-utils.js';
 
 export class ProtectedValue {
     readonly value: Uint8Array;

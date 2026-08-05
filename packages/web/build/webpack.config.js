@@ -22,7 +22,7 @@ export default (_env, argv) => {
     const outputPath = path.join(rootDir, 'dist/chrome');
 
     const tsRule = {
-        test: /\.ts$/,
+        test: /\.tsx?$/,
         use: {
             loader: 'ts-loader',
             options: { configFile: path.join(rootDir, 'tsconfig.json') }
@@ -36,7 +36,7 @@ export default (_env, argv) => {
             entry: path.join(rootDir, 'src/background/index.ts'),
             output: { path: outputPath, filename: 'background.js' },
             target: 'webworker',
-            resolve: { extensions: ['.ts', '.js'] },
+            resolve: { extensions: ['.tsx', '.ts', '.js'] },
             module: { rules: [tsRule] },
             plugins: [
                 new CopyPlugin({
@@ -71,7 +71,7 @@ export default (_env, argv) => {
             entry: path.join(rootDir, 'src/dev-harness/index.ts'),
             output: { path: outputPath, filename: 'dev-harness/index.js' },
             target: 'web',
-            resolve: { extensions: ['.ts', '.js'] },
+            resolve: { extensions: ['.tsx', '.ts', '.js'] },
             module: { rules: [tsRule] },
             plugins: [
                 new CopyPlugin({
@@ -79,6 +79,26 @@ export default (_env, argv) => {
                         {
                             from: path.join(rootDir, 'src/dev-harness/index.html'),
                             to: 'dev-harness/index.html'
+                        }
+                    ]
+                })
+            ],
+            devtool,
+            mode
+        },
+        {
+            name: 'popup',
+            entry: path.join(rootDir, 'src/ui/popup/index.tsx'),
+            output: { path: outputPath, filename: 'popup/index.js' },
+            target: 'web',
+            resolve: { extensions: ['.tsx', '.ts', '.js'] },
+            module: { rules: [tsRule] },
+            plugins: [
+                new CopyPlugin({
+                    patterns: [
+                        {
+                            from: path.join(rootDir, 'src/ui/popup/popup.html'),
+                            to: 'popup/popup.html'
                         }
                     ]
                 })

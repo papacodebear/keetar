@@ -6,5 +6,8 @@
   "background": {
     "service_worker": "background.js"
   },
-  "permissions": ["storage", "idle", "alarms"]
+  "action": {
+    "default_popup": "popup/popup.html"
+  },
+  "permissions": ["storage", "idle", "alarms", "clipboardWrite"]
 }

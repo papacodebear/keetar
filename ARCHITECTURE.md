@@ -187,12 +187,20 @@ keetar/
 │       │   │   └── matcher.ts         # Domain matching: exact → hostname → base domain → title
 │       │   ├── ui/
 │       │   │   ├── popup/             # Quick-access UI, post-unlock — see §8
+│       │   │   │   ├── index.tsx      # Webpack entry — mounts <App /> into #root
+│       │   │   │   ├── App.tsx        # Locked/unlocked view state machine
+│       │   │   │   └── popup.html
 │       │   │   ├── manager/           # Vault-content management UI, post-unlock only — see §8
 │       │   │   └── options/           # Setup + config, reachable pre-unlock — see §8
-│       │   └── platform/
-│       │       ├── chrome.ts          # Chrome-specific: MV3 service worker, chrome.identity
-│       │       ├── firefox.ts         # Firefox-specific: MV2 background page, browser.identity
-│       │       └── index.ts           # Re-exports correct shim based on build target
+│       │   ├── platform/
+│       │   │   ├── chrome.ts          # Chrome-specific: MV3 service worker, chrome.identity
+│       │   │   ├── firefox.ts         # Firefox-specific: MV2 background page, browser.identity
+│       │   │   └── index.ts           # Re-exports correct shim based on build target
+│       │   └── config/
+│       │       └── vault-config.ts    # Configured-vault storage key/shape — shared between
+│       │                              # whatever currently owns file selection (dev-harness,
+│       │                              # eventually Options — §8.2) and Popup (needs the uuid
+│       │                              # to send with UNLOCK_VAULT), so it exists in one place
 │       ├── manifests/
 │       │   ├── manifest.chrome.json   # MV3
 │       │   └── manifest.firefox.json  # MV2 (MV3 target added in Phase 11)
@@ -753,13 +761,13 @@ Additionally, the popup sends a ping message to background every 20s while open.
 
 ### 10.1 Webpack Config
 
-`packages/web/build/webpack.config.js` defines five separate entry points — never combine them:
+`packages/web/build/webpack.config.js` defines five separate bundles — never combine them. In practice this is five separate webpack *config objects* (the file's default export is an array), not five entries in one config — see §13's `webpack` + `ts-loader` row for why (service worker vs. page bundles need incompatible `target`s, and webpack's `target` is config-wide, not per-entry).
 
 | Bundle (compiled output) | Entry (TypeScript source) | Runs in |
 |---|---|---|
 | `background.js` | `src/background/index.ts` | Service worker / background page |
 | `content.js` | `src/autofill/content.ts` | Page context (injected) |
-| `popup.js` | `src/ui/popup/App.tsx` | Extension popup iframe, post-unlock |
+| `popup/index.js` | `src/ui/popup/index.tsx` | Extension popup, post-unlock. Entry mounts `App.tsx`'s locked/unlocked state machine — not `App.tsx` directly, so the mount call and the component stay separate. |
 | `manager.js` | `src/ui/manager/App.tsx` | Extension tab (full page), post-unlock only |
 | `options.js` | `src/ui/options/App.tsx` | Full options page, reachable pre-unlock |
 
@@ -867,8 +875,8 @@ Build in this exact order. Each phase has a testable stopping point. Do not star
 | Phase | Focus | Completion criteria |
 |---|---|---|
 | **1** | Crypto engine + KDBX parser (`@keetar/core`) | `crypto/` and `kdbx/` pass all official KeePass test vectors, in Node, no browser. Test harness only. |
-| **2** | Local-file backend + vault session (`@keetar/web`) | Open a real local `.kdbx` file via the File System Access API, decrypt, hold in memory, lock on idle timeout. Browser console or minimal UI only — in practice this still needs *some* page: `showOpenFilePicker()` requires an active document with a user gesture, which a service worker doesn't have. `src/dev-harness/` fills that gap (file-picker button + password field + unlock/lock buttons, messaging the background service worker) — it is explicitly not one of §8.1's three real UI surfaces and should be deleted once Popup (Phase 3) and Options exist for real. |
-| **3** | Popup UI (read-only) | Show entry list, search, copy username/password to clipboard. No editing, no autofill yet. |
+| **2** | Local-file backend + vault session (`@keetar/web`) | Open a real local `.kdbx` file via the File System Access API, decrypt, hold in memory, lock on idle timeout. Browser console or minimal UI only — in practice this still needs *some* page: `showOpenFilePicker()` requires an active document with a user gesture, which a service worker doesn't have. `src/dev-harness/` fills that gap. Its unlock/view-content responsibility moved to the real Popup once Phase 3 built it; it now stands in only for Options' file-selection piece (§8.2), which doesn't have a real home yet, and should be deleted once Options exists for real. |
+| **3** | Popup UI (read-only) | Show entry list, search, copy username/password to clipboard. No editing, no autofill yet. Built as a locked/unlocked state machine (`App.tsx`) — Popup is the surface that actually prompts for the master password (§4.2, §6.2's "open extension → ... → vault open" describes this gesture), even though §8.1 frames it as "post-unlock": that's its primary/steady-state content, not its only state. `GET_ENTRY_FIELD` returns one field's plaintext at a time, on demand, rather than handing the popup the full entry set — the same "give a surface only what it needs, when it needs it" instinct §5.1 applies to content scripts, applied here even though Popup is trusted (not hostile) — no reason to hold more decrypted material in the popup's own memory than the current action requires. |
 | **4** | Autofill | Content script + domain matching + credential injection. Test manually on 10 real sites including Google and GitHub. |
 | **5** | Write path | `kdbx-format.ts`'s `save()`/`saveV4()` (§2.7 — per-object-model split, not a separate `writer.ts`) — add, edit, delete entries, save back to the local file handle. **Critical:** output must open in KeePassXC desktop without errors. |
 | **6** | Manager UI | Full vault-content management surface (§8), post-unlock only: entry editing, group management, attachments, wired to the write path from Phase 5. |

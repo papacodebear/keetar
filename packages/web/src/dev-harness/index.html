@@ -2,39 +2,26 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Keetar dev harness (Phase 2 only)</title>
+    <title>Keetar dev harness</title>
     <style>
       body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
       h1 { font-size: 1.1rem; }
       p.warning { background: #fff3cd; border: 1px solid #ffe69c; padding: 0.5rem 0.75rem; border-radius: 4px; }
       section { margin-top: 1.5rem; }
-      button { margin-right: 0.5rem; }
-      pre { background: #f4f4f4; padding: 0.75rem; border-radius: 4px; white-space: pre-wrap; }
     </style>
   </head>
   <body>
     <h1>Keetar dev harness</h1>
     <p class="warning">
-      Not one of the real UI surfaces (§8) — a temporary page for manually verifying Phase 2's
-      local-file backend + vault session plumbing end to end. Delete once Popup (Phase 3) and
-      Options exist for real.
+      Not one of the real UI surfaces (§8) — stands in only for Options' file-selection
+      responsibility (§8.2) until Options exists for real. Unlocking and viewing vault content
+      moved to the real Popup (Phase 3) — Options must never touch decrypted vault content either.
+      Delete once Options exists.
     </p>
 
     <section>
-      <div>Status: <span id="status">unknown</span></div>
       <div id="selected-file">No vault file selected.</div>
       <button id="pick-file">Select Vault File</button>
-    </section>
-
-    <section>
-      <label for="password">Master password</label><br />
-      <input type="password" id="password" autocomplete="off" />
-      <button id="unlock">Unlock</button>
-      <button id="lock">Lock</button>
-    </section>
-
-    <section>
-      <pre id="output"></pre>
     </section>
 
     <script type="module" src="index.js"></script>

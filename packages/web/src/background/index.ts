@@ -29,5 +29,13 @@ registerMessageHandler(async (request): Promise<KeetarResponse> => {
             return { ok: true, type: 'LOCK_VAULT' };
         case 'GET_STATUS':
             return { ok: true, type: 'GET_STATUS', status: vaultSession.status };
+        case 'LIST_ENTRIES':
+            return { ok: true, type: 'LIST_ENTRIES', entries: vaultSession.listEntries() };
+        case 'GET_ENTRY_FIELD':
+            return {
+                ok: true,
+                type: 'GET_ENTRY_FIELD',
+                value: vaultSession.getEntryField(request.entryUuid, request.field)
+            };
     }
 });

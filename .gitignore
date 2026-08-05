@@ -141,3 +141,10 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# @keetar/web is bundled by webpack, not consumed as a library — its
+# tsconfig disables declaration emit, but this is a safety net: ts-loader's
+# full-program compile has previously written stray .d.ts/.d.ts.map files
+# directly into src/ as a side effect when declaration emit was left on.
+packages/web/src/**/*.d.ts
+packages/web/src/**/*.d.ts.map

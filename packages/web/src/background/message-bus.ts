@@ -1,19 +1,23 @@
-import type { VaultSummary } from './vault-session';
+import type { EntryFieldName, EntrySummary, VaultSummary } from './vault-session';
 
 // Typed message router between popup/manager/content/background (§2.4). Only
-// the messages Phase 2 needs exist yet — later phases (autofill, Manager
-// writes, biometric unlock) add more variants to these unions rather than
-// building a separate mechanism.
+// the messages built so far exist — later phases (autofill, Manager writes,
+// biometric unlock) add more variants to these unions rather than building a
+// separate mechanism.
 
 export type KeetarRequest =
     | { type: 'UNLOCK_VAULT'; uuid: string; password: string }
     | { type: 'LOCK_VAULT' }
-    | { type: 'GET_STATUS' };
+    | { type: 'GET_STATUS' }
+    | { type: 'LIST_ENTRIES' }
+    | { type: 'GET_ENTRY_FIELD'; entryUuid: string; field: EntryFieldName };
 
 export type KeetarResponse =
     | { ok: true; type: 'UNLOCK_VAULT'; summary: VaultSummary }
     | { ok: true; type: 'LOCK_VAULT' }
     | { ok: true; type: 'GET_STATUS'; status: 'locked' | 'unlocked' }
+    | { ok: true; type: 'LIST_ENTRIES'; entries: EntrySummary[] }
+    | { ok: true; type: 'GET_ENTRY_FIELD'; value: string }
     | { ok: false; error: string };
 
 export type KeetarRequestHandler = (request: KeetarRequest) => Promise<KeetarResponse>;

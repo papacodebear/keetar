@@ -3,7 +3,17 @@
   "compilerOptions": {
     "rootDir": ".",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["node", "chrome", "wicg-file-system-access"]
+    "types": ["node", "chrome", "wicg-file-system-access"],
+    "jsx": "react-jsx",
+    // @keetar/web is bundled by webpack into an extension, not consumed as a
+    // library by anything else — it has no business emitting .d.ts files.
+    // The root tsconfig turns declaration/declarationMap on for @keetar/core
+    // (a real library), but ts-loader's full-program compile writes them to
+    // disk as a side effect wherever it's inherited, landing stray .d.ts/
+    // .d.ts.map files directly in src/ next to their sources. Override back
+    // off here.
+    "declaration": false,
+    "declarationMap": false
   },
   "include": ["src", "tests"]
 }

@@ -938,7 +938,8 @@ Build in this exact order. Each phase has a testable stopping point. Do not star
 | **8** | TOTP + health | TOTP generation + autofill, HIBP breach checking, password health report (weak, reused, old, breached). |
 | **9** | Import / export | CSV, Bitwarden JSON, 1Password 1PUX, Proton Pass JSON. Export to CSV and XML. |
 | **10** | Cloud providers (deferred, §7.3) | Google Drive first (largest user base), then Dropbox, then OneDrive. One provider at a time. Each must handle offline + conflict cases via the OPFS sync strategy (§4.3). |
-| **11** | Firefox + polish | MV2 manifest, platform shim verification, Firefox-specific bug fixes. Submit to Chrome Web Store and Firefox AMO. |
+| **11** | Firefox + polish | MV2 manifest, platform shim verification, Firefox-specific bug fixes. |
+| **12** | Beta feedback loop | Not a fixed scope like the phases above — an open-ended loop, run for as long as testing keeps finding things worth fixing. Solo dogfooding to start: run it against real, existing, pre-Keetar KeePass databases (not fresh test vaults) on a real machine — the first real-world exposure for everything Phases 1–11 could only reason about or unit-test from here. Widening to other testers, if it happens, is a separate later call, not assumed here. Expect: UI rough edges surfaced by actual daily use, bugs specific to real vaults/sites/hardware no test suite caught, and last-mile feature requests worth doing before a public release but not worth guessing at upfront. Fix and iterate; repeat until the loop stops turning up must-fix issues. **Only then** submit to the Chrome Web Store and Firefox AMO — store review turnaround makes shipping fixes slow and public, so this loop is what happens *before* that, not after. |
 
 ---
 

@@ -1,11 +1,21 @@
-import { ByteUtils, Kdbx, KdbxCredentials, KdbxBinaries, ProtectedValue } from '@keetar/core';
+import {
+    analysePasswordHealth,
+    ByteUtils,
+    createHibpClient,
+    Kdbx,
+    KdbxCredentials,
+    KdbxBinaries,
+    ProtectedValue,
+    Totp
+} from '@keetar/core';
 import type {
     KdbxBinary,
     KdbxBinaryWithHash,
     KdbxEntry,
     KdbxEntryField,
     KdbxGroup,
-    KdbxMemoryProtection
+    KdbxMemoryProtection,
+    PasswordHealthReport
 } from '@keetar/core';
 import { LocalFileProvider } from '../providers/local-file';
 
@@ -25,6 +35,7 @@ export interface EntrySummary {
     username: string;
     /** Primary URL plus any KP2A_URL_* custom strings (§5.4) — fed straight into autofill/matcher.ts. */
     urls: string[];
+    hasTotp: boolean;
 }
 
 export type EntryFieldName = 'username' | 'password';
@@ -65,6 +76,8 @@ export interface GroupSummary {
     name: string;
 }
 
+export type { PasswordHealthReport };
+
 const FIELD_MAP: Record<keyof EntryFields, { kdbxName: string; protectionKey: keyof KdbxMemoryProtection }> = {
     title: { kdbxName: 'Title', protectionKey: 'title' },
     username: { kdbxName: 'UserName', protectionKey: 'userName' },
@@ -81,6 +94,7 @@ const MAX_SUMMARY_TITLES = 20;
 
 class VaultSession {
     private state: VaultSessionState = { status: 'locked' };
+    private readonly hibpClient = createHibpClient();
 
     get status(): VaultSessionState['status'] {
         return this.state.status;
@@ -152,6 +166,29 @@ class VaultSession {
         const entry = this.requireEntry(entryUuid);
         const fieldName = field === 'username' ? 'UserName' : 'Password';
         return fieldText(entry.fields.get(fieldName));
+    }
+
+    getEntryTotp(entryUuid: string): Promise<Totp.TotpCode> {
+        const entry = this.requireEntry(entryUuid);
+        const value = fieldText(entry.fields.get('otp')) || fieldText(entry.fields.get('TOTP Seed'));
+        if (!value) {
+            throw new Error('entry has no TOTP secret');
+        }
+        return Totp.generateTotpCode(value);
+    }
+
+    getPasswordHealth(): Promise<PasswordHealthReport> {
+        const db = this.requireUnlocked();
+        const recycleBinUuid = db.meta.recycleBinUuid;
+        const entries = Array.from(db.getDefaultGroup().allEntries())
+            .filter((entry) => !recycleBinUuid || !isInGroup(entry, recycleBinUuid))
+            .map((entry) => ({
+                uuid: entry.uuid.id,
+                title: fieldText(entry.fields.get('Title')),
+                password: fieldText(entry.fields.get('Password')),
+                lastModified: entry.times.lastModTime
+            }));
+        return analysePasswordHealth(entries, (password) => this.hibpClient.checkPassword(password));
     }
 
     // Full vault-content tree for Manager (§8.2 — "group tree management").
@@ -367,7 +404,8 @@ function summarizeEntry(entry: KdbxEntry): EntrySummary {
         uuid: entry.uuid.id,
         title: fieldText(entry.fields.get('Title')),
         username: fieldText(entry.fields.get('UserName')),
-        urls: entryUrls(entry)
+        urls: entryUrls(entry),
+        hasTotp: Boolean(fieldText(entry.fields.get('otp')) || fieldText(entry.fields.get('TOTP Seed')))
     };
 }
 
@@ -406,6 +444,15 @@ function findGroup(group: KdbxGroup, uuid: string): KdbxGroup | undefined {
         }
     }
     return undefined;
+}
+
+function isInGroup(entry: KdbxEntry, groupUuid: Kdbx['meta']['recycleBinUuid']): boolean {
+    for (let group = entry.parentGroup; group; group = group.parentGroup) {
+        if (group.uuid.equals(groupUuid)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function summarize(db: Kdbx): VaultSummary {

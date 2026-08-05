@@ -5,6 +5,7 @@ import type {
     EntrySummary,
     GroupNode,
     GroupSummary,
+    PasswordHealthReport,
     VaultSummary
 } from './vault-session';
 import type { MatchResult } from '../autofill/matcher';
@@ -26,6 +27,8 @@ export type KeetarRequest =
     | { type: 'GET_STATUS' }
     | { type: 'LIST_ENTRIES' }
     | { type: 'GET_ENTRY_FIELD'; entryUuid: string; field: EntryFieldName }
+    | { type: 'GET_ENTRY_TOTP'; entryUuid: string }
+    | { type: 'GET_PASSWORD_HEALTH' }
     | { type: 'LOGIN_FORM_DETECTED' }
     | { type: 'MATCH_ENTRIES'; tabUrl: string }
     | { type: 'CREATE_ENTRY'; groupUuid: string; fields: EntryFields }
@@ -48,6 +51,8 @@ export type KeetarResponse =
     | { ok: true; type: 'GET_STATUS'; status: 'locked' | 'unlocked' }
     | { ok: true; type: 'LIST_ENTRIES'; entries: EntrySummary[] }
     | { ok: true; type: 'GET_ENTRY_FIELD'; value: string }
+    | { ok: true; type: 'GET_ENTRY_TOTP'; code: string; remainingSeconds: number }
+    | { ok: true; type: 'GET_PASSWORD_HEALTH'; report: PasswordHealthReport }
     | { ok: true; type: 'LOGIN_FORM_DETECTED' }
     | { ok: true; type: 'MATCH_ENTRIES'; matches: MatchResult[] }
     | { ok: true; type: 'CREATE_ENTRY'; entry: EntrySummary }

@@ -5,4 +5,5 @@ export interface FillCredentialsMessage {
     type: 'FILL_CREDENTIALS';
     username?: string;
     password?: string;
+    otp?: string;
 }

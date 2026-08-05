@@ -1,4 +1,4 @@
-import { ByteUtils } from '@keetar/core';
+import { ByteUtils, preloadPasswordStrength } from '@keetar/core';
 import { installArgon2 } from './argon2-wasm';
 import { vaultSession } from './vault-session';
 import { registerMessageHandler, type KeetarResponse } from './message-bus';
@@ -10,6 +10,7 @@ import { matchEntries } from '../autofill/matcher';
 
 installArgon2();
 startKeepalive();
+void preloadPasswordStrength();
 
 // Idle timeout (§3.4): lock on "locked" or "idle" state. 5 min default.
 const DEFAULT_IDLE_TIMEOUT_SECONDS = 5 * 60;
@@ -43,6 +44,16 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
                 ok: true,
                 type: 'GET_ENTRY_FIELD',
                 value: vaultSession.getEntryField(request.entryUuid, request.field)
+            };
+        case 'GET_ENTRY_TOTP': {
+            const { code, remainingSeconds } = await vaultSession.getEntryTotp(request.entryUuid);
+            return { ok: true, type: 'GET_ENTRY_TOTP', code, remainingSeconds };
+        }
+        case 'GET_PASSWORD_HEALTH':
+            return {
+                ok: true,
+                type: 'GET_PASSWORD_HEALTH',
+                report: await vaultSession.getPasswordHealth()
             };
         case 'LOGIN_FORM_DETECTED': {
             // Background, not the content script, decides whether/what to

@@ -1,4 +1,4 @@
-import { detectLoginForm } from './detector';
+import { detectLoginForm, detectOneTimeCodeField } from './detector';
 import { fillField } from './filler';
 import type { FillCredentialsMessage } from './messages';
 import { sendToBackground } from '../background/message-bus';
@@ -39,16 +39,17 @@ chrome.runtime.onMessage.addListener((message: FillCredentialsMessage) => {
         return;
     }
     const form = detectLoginForm(document);
-    if (!form) {
-        return;
-    }
     // Only fill fields that actually exist — a multi-step flow (§5.2) may
     // have only a username field at this point, and there's nothing to fill
     // a password into yet.
-    if (form.usernameField && message.username !== undefined) {
+    if (form?.usernameField && message.username !== undefined) {
         fillField(form.usernameField, message.username);
     }
-    if (form.passwordField && message.password !== undefined) {
+    if (form?.passwordField && message.password !== undefined) {
         fillField(form.passwordField, message.password);
+    }
+    const otpField = detectOneTimeCodeField(document);
+    if (otpField && message.otp !== undefined) {
+        fillField(otpField, message.otp);
     }
 });

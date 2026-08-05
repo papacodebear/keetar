@@ -142,12 +142,16 @@ async function matchActiveTab(): Promise<Set<string>> {
     return new Set();
 }
 
-async function fillActiveTab(username: string | undefined, password: string | undefined): Promise<void> {
+async function fillActiveTab(
+    username: string | undefined,
+    password: string | undefined,
+    otp: string | undefined
+): Promise<void> {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id === undefined) {
         return;
     }
-    const message: FillCredentialsMessage = { type: 'FILL_CREDENTIALS', username, password };
+    const message: FillCredentialsMessage = { type: 'FILL_CREDENTIALS', username, password, otp };
     await chrome.tabs.sendMessage(tab.id, message);
 }
 
@@ -274,8 +278,24 @@ function UnlockedView({
         ]);
         const username = usernameRes.ok && usernameRes.type === 'GET_ENTRY_FIELD' ? usernameRes.value : undefined;
         const password = passwordRes.ok && passwordRes.type === 'GET_ENTRY_FIELD' ? passwordRes.value : undefined;
-        await fillActiveTab(username, password);
+        await fillActiveTab(username, password, undefined);
         showToast('Filled');
+    }
+
+    async function copyTotp(entryUuid: string): Promise<void> {
+        const response = await sendToBackground({ type: 'GET_ENTRY_TOTP', entryUuid });
+        if (response.ok && response.type === 'GET_ENTRY_TOTP') {
+            await navigator.clipboard.writeText(response.code);
+            showToast(`${response.code} copied`);
+        }
+    }
+
+    async function fillTotp(entryUuid: string): Promise<void> {
+        const response = await sendToBackground({ type: 'GET_ENTRY_TOTP', entryUuid });
+        if (response.ok && response.type === 'GET_ENTRY_TOTP') {
+            await fillActiveTab(undefined, undefined, response.code);
+            showToast('OTP filled');
+        }
     }
 
     // Manager owns entry editing (§8.2) — Popup only opens it (§8.1).
@@ -318,6 +338,16 @@ function UnlockedView({
                             <button type="button" onClick={() => void copyField(entry.uuid, 'password', 'Password')}>
                                 Pass
                             </button>
+                            {entry.hasTotp && (
+                                <>
+                                    <button type="button" onClick={() => void copyTotp(entry.uuid)}>
+                                        OTP
+                                    </button>
+                                    <button type="button" onClick={() => void fillTotp(entry.uuid)}>
+                                        Fill OTP
+                                    </button>
+                                </>
+                            )}
                         </div>
                     </li>
                 ))}

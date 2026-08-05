@@ -30,10 +30,12 @@
   "dependencies": {
     "@stablelib/chacha": "^2.0.1",
     "@xmldom/xmldom": "^0.8.10",
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.2",
+    "zxcvbn": "^4.4.2"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/zxcvbn": "^4.4.5",
     "argon2-browser": "^1.18.0",
     "typescript": "~5.9.0",
     "vitest": "^2.1.0"

@@ -37,6 +37,16 @@ export function detectLoginForm(root: ParentNode = document): DetectedLoginForm 
     return undefined;
 }
 
+export function detectOneTimeCodeField(root: ParentNode = document): HTMLInputElement | undefined {
+    const autocompleteField = query(root, 'input[autocomplete="one-time-code"]');
+    if (autocompleteField) {
+        return autocompleteField;
+    }
+    return queryAll(root, 'input[maxlength="6"], input[maxlength="7"], input[maxlength="8"]').find(
+        (field) => field.getClientRects().length > 0
+    );
+}
+
 // 1. autocomplete="username" / autocomplete="current-password" (most reliable)
 function byAutocomplete(root: ParentNode): DetectedLoginForm | undefined {
     const usernameField = query(root, 'input[autocomplete="username"]');

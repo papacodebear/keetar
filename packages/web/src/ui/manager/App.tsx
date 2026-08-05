@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ByteUtils } from '@keetar/core';
+import { ByteUtils, estimatePasswordEntropy } from '@keetar/core';
 import { sendToBackground } from '../../background/message-bus';
-import type { EntryDetail, GroupNode } from '../../background/vault-session';
+import type { EntryDetail, GroupNode, PasswordHealthReport } from '../../background/vault-session';
 
 // Manager — full vault-content management, post-unlock only (§8.1). Owns
 // entry create/edit/delete, group tree management, attachments (§8.2). Owns
@@ -80,13 +80,33 @@ function Ready({
     onReload: (keepSelection?: { groupUuid: string; entryUuid?: string }) => Promise<void>;
 }) {
     const selectedGroup = findGroup(root, selectedGroupUuid) ?? root;
+    const [healthReport, setHealthReport] = useState<PasswordHealthReport | undefined>(undefined);
+    const [healthError, setHealthError] = useState<string | undefined>(undefined);
+    const [checkingHealth, setCheckingHealth] = useState(false);
 
     function selectGroup(groupUuid: string): void {
         void onReload({ groupUuid });
     }
 
     function selectEntry(entryUuid: string): void {
+        setHealthReport(undefined);
+        setHealthError(undefined);
         void onReload({ groupUuid: selectedGroupUuid, entryUuid });
+    }
+
+    async function loadPasswordHealth(): Promise<void> {
+        setCheckingHealth(true);
+        setHealthError(undefined);
+        try {
+            const response = await sendToBackground({ type: 'GET_PASSWORD_HEALTH' });
+            if (response.ok && response.type === 'GET_PASSWORD_HEALTH') {
+                setHealthReport(response.report);
+            } else if (!response.ok) {
+                setHealthError(response.error);
+            }
+        } finally {
+            setCheckingHealth(false);
+        }
     }
 
     async function createGroup(parentGroupUuid: string): Promise<void> {
@@ -133,6 +153,9 @@ function Ready({
             <div className="tree-pane">
                 <div className="tree-pane-header">
                     <strong>Groups</strong>
+                    <button type="button" onClick={() => void loadPasswordHealth()} disabled={checkingHealth}>
+                        {checkingHealth ? 'Checking' : 'Health'}
+                    </button>
                 </div>
                 <GroupTreeNode
                     node={root}
@@ -165,7 +188,16 @@ function Ready({
                 ))}
             </div>
             <div className="detail-pane">
-                {selectedEntryUuid ? (
+                {healthReport ? (
+                    <PasswordHealthPanel report={healthReport} onClose={() => setHealthReport(undefined)} />
+                ) : healthError ? (
+                    <div className="empty-state">
+                        <p>{healthError}</p>
+                        <button type="button" onClick={() => setHealthError(undefined)}>
+                            Close
+                        </button>
+                    </div>
+                ) : selectedEntryUuid ? (
                     <EntryDetailPanel
                         key={selectedEntryUuid}
                         entryUuid={selectedEntryUuid}
@@ -177,6 +209,44 @@ function Ready({
                     <p className="empty-state">Select an entry to view or edit it.</p>
                 )}
             </div>
+        </div>
+    );
+}
+
+function PasswordHealthPanel({ report, onClose }: { report: PasswordHealthReport; onClose: () => void }) {
+    return (
+        <div>
+            <div className="middle-pane-header">
+                <strong>Password health</strong>
+                <button type="button" onClick={onClose}>
+                    Close
+                </button>
+            </div>
+            <p>
+                {report.total} entries: {report.weak} weak, {report.reused} reused, {report.old} old, {report.breached}{' '}
+                breached.
+            </p>
+            {report.findings.length === 0 ? (
+                <p className="empty-state">No password issues found.</p>
+            ) : (
+                <ul className="health-list">
+                    {report.findings.map((finding) => (
+                        <li key={finding.entryUuid} className="health-row">
+                            <div className="entry-row-title">{finding.title || '(no title)'}</div>
+                            <div className="entry-row-username">
+                                {[
+                                    finding.weak && `weak (${finding.entropy.toFixed(1)} bits)`,
+                                    finding.reused && 'reused',
+                                    finding.old && 'old',
+                                    finding.breachCount > 0 && `breached (${finding.breachCount})`
+                                ]
+                                    .filter(Boolean)
+                                    .join(', ')}
+                            </div>
+                        </li>
+                    ))}
+                </ul>
+            )}
         </div>
     );
 }
@@ -384,16 +454,12 @@ function EntryDetailPanel({
             </div>
             <div className="field">
                 <label>Password</label>
-                <div className="password-row">
-                    <input
-                        type={showPassword ? 'text' : 'password'}
-                        defaultValue={entry.password}
-                        onBlur={(e) => void saveField('password', e.target.value)}
-                    />
-                    <button type="button" onClick={() => setShowPassword((v) => !v)}>
-                        {showPassword ? 'Hide' : 'Show'}
-                    </button>
-                </div>
+                <PasswordEditor
+                    initialPassword={entry.password}
+                    showPassword={showPassword}
+                    onToggleVisibility={() => setShowPassword((visible) => !visible)}
+                    onSave={(password) => saveField('password', password)}
+                />
             </div>
             <div className="field">
                 <label>URL</label>
@@ -450,5 +516,51 @@ function EntryDetailPanel({
                 Delete entry
             </button>
         </div>
+    );
+}
+
+function PasswordEditor({
+    initialPassword,
+    showPassword,
+    onToggleVisibility,
+    onSave
+}: {
+    initialPassword: string;
+    showPassword: boolean;
+    onToggleVisibility: () => void;
+    onSave: (password: string) => Promise<void>;
+}) {
+    const [password, setPassword] = useState(initialPassword);
+    const [entropy, setEntropy] = useState<number | undefined>(undefined);
+
+    useEffect(() => {
+        setEntropy(undefined);
+        const timer = window.setTimeout(() => {
+            void estimatePasswordEntropy(password).then(setEntropy, () => setEntropy(undefined));
+        }, 150);
+        return () => window.clearTimeout(timer);
+    }, [password]);
+
+    return (
+        <>
+            <div className="password-row">
+                <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onBlur={() => void onSave(password)}
+                />
+                <button type="button" onClick={onToggleVisibility}>
+                    {showPassword ? 'Hide' : 'Show'}
+                </button>
+            </div>
+            <div className="password-strength">
+                {entropy === undefined
+                    ? 'Checking strength…'
+                    : entropy < 75
+                      ? `Weak (${entropy.toFixed(1)} bits)`
+                      : `Strong (${entropy.toFixed(1)} bits)`}
+            </div>
+        </>
     );
 }

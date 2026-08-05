@@ -25,6 +25,8 @@ import { KdbxMeta } from './kdbx/kdbx-meta.js';
 import { KdbxTimes } from './kdbx/kdbx-times.js';
 import { KdbxUuid } from './kdbx/kdbx-uuid.js';
 
+import * as Totp from './totp/totp.js';
+
 import { BinaryStream } from './utils/binary-stream.js';
 import * as ByteUtils from './utils/byte-utils.js';
 import { Int64 } from './utils/int64.js';
@@ -56,6 +58,7 @@ export {
     KdbxMeta,
     KdbxTimes,
     KdbxUuid,
+    Totp,
     BinaryStream,
     ByteUtils,
     Int64,
@@ -73,6 +76,20 @@ export type {
     KdbxBinaryWithHash
 } from './kdbx/kdbx-binaries.js';
 export type { KdbxChallengeResponseFn } from './kdbx/kdbx-credentials.js';
+export {
+    analysePasswordHealth,
+    estimatePasswordEntropy,
+    preloadPasswordStrength
+} from './health/analyser.js';
+export { checkPasswordBreach, createHibpClient } from './health/hibp.js';
+export type {
+    PasswordBreachChecker,
+    PasswordHealthEntry,
+    PasswordHealthFinding,
+    PasswordHealthReport
+} from './health/analyser.js';
+export type { HibpClient, HibpFetch } from './health/hibp.js';
+export type { TotpAlgorithm, TotpCode, TotpConfig } from './totp/totp.js';
 export type { KdbxCustomDataMap, KdbxCustomDataItem } from './kdbx/kdbx-custom-data.js';
 export type {
     KdbxAutoTypeItem,

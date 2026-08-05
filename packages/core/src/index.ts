@@ -1,3 +1,4 @@
+import * as SessionKey from './auth/session-key.js';
 import { ChaCha20 } from './crypto/chacha20.js';
 import * as CryptoEngine from './crypto/crypto-engine.js';
 import * as HmacBlockTransform from './crypto/hmac-block-transform.js';
@@ -31,6 +32,7 @@ import { VarDictionary } from './utils/var-dictionary.js';
 import * as XmlUtils from './utils/xml-utils.js';
 
 export {
+    SessionKey,
     ChaCha20,
     CryptoEngine,
     HmacBlockTransform,

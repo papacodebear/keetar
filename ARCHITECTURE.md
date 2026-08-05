@@ -142,7 +142,19 @@ keetar/
 │   │   │   │   ├── var-dictionary.ts  # KDBX's VarDictionary format (KDF param serialization)
 │   │   │   │   └── xml-utils.ts       # KDBX XML parse/serialize, protected-value XOR pass
 │   │   │   ├── auth/
-│   │   │   │   └── session-key.ts     # AES-KW wrap/unwrap of the session key, given VUK bytes
+│   │   │   │   └── session-key.ts     # Generic AES-KW wrap/unwrap of raw key material, given VUK
+│   │   │   │                          # bytes. Wraps KdbxCredentials.passwordHash (SHA-256 of the
+│   │   │   │                          # master password, already a fixed 32 bytes — a public,
+│   │   │   │                          # settable field getHash() reads without ever touching the
+│   │   │   │                          # live password string) — not the post-Argon2 derived cipher
+│   │   │   │                          # key as earlier drafts of this doc said. See §6.2's note for
+│   │   │   │                          # why: reusing the derived key to skip Argon2 on reopen would
+│   │   │   │                          # need a new entry point into kdbx-format.ts's private,
+│   │   │   │                          # security-critical decrypt pipeline, unverifiable against
+│   │   │   │                          # real WebAuthn hardware from here — wrapping the password
+│   │   │   │                          # hash instead needs zero core changes, Kdbx.load() runs
+│   │   │   │                          # completely unmodified, and saving afterward isn't a special
+│   │   │   │                          # case since real credentials exist the whole time.
 │   │   │   ├── providers/
 │   │   │   │   └── file-provider.ts   # FileProvider interface (type only, no implementation)
 │   │   │   ├── generator/
@@ -168,7 +180,11 @@ keetar/
 │       │   │   ├── index.ts           # Entry point — registers listeners, initialises session
 │       │   │   ├── vault-session.ts   # In-memory decrypted vault state + lock logic
 │       │   │   ├── keepalive.ts       # Chrome MV3 service worker keepalive (alarm ping)
-│       │   │   ├── message-bus.ts     # Typed message router between popup/manager/content/background
+│       │   │   ├── message-bus.ts     # Typed message router between popup/manager/content/background.
+│       │   │                          # chrome.runtime.sendMessage's documented contract is a
+│       │   │                          # JSON-ifiable payload — ArrayBuffer isn't one (serializes to
+│       │   │                          # "{}"). Attachment bytes (Manager, §8.2) cross as base64
+│       │   │                          # strings instead, via @keetar/core's ByteUtils codecs.
 │       │   │   └── argon2-wasm.ts     # Wires argon2-browser's WASM Module into CryptoEngine (§3.1, §11.4)
 │       │   ├── providers/
 │       │   │   ├── local-file.ts      # File System Access API — near-term primary backend
@@ -179,19 +195,36 @@ keetar/
 │       │   ├── auth/
 │       │   │   ├── webauthn.ts        # WebAuthn credential registration + assertion
 │       │   │   ├── prf.ts             # PRF extension — derive VUK from authenticator output
-│       │   │   └── biometric.ts       # Enrol + unlock flow orchestration
+│       │   │   ├── biometric.ts       # Enrol + unlock flow orchestration
+│       │   │   └── biometric-store.ts # Per-vault { credentialId, prfSalt, wrappedPasswordHash,
+│       │   │                          # enrolledAt } record in real OPFS (§4.1) — unlike
+│       │   │                          # local-file.ts's handle store (IndexedDB, forced by
+│       │   │                          # FileSystemFileHandle not being JSON-serializable), this
+│       │   │                          # data has no such constraint, so it follows §4.1 as written.
+│       │   │                          # OPFS needs no user gesture, reachable from both background
+│       │   │                          # and pages — unlock (background) and enrollment (Options)
+│       │   │                          # both use this unmodified.
 │       │   ├── autofill/
 │       │   │   ├── content.ts         # Content script: detect login forms, receive fill msg
 │       │   │   ├── detector.ts        # DOM heuristics for username/password field pairs
 │       │   │   ├── filler.ts          # Credential injection compatible with React/Vue/Angular
-│       │   │   └── matcher.ts         # Domain matching: exact → hostname → base domain → title
+│       │   │   ├── matcher.ts         # Domain matching: exact → hostname → base domain → title
+│       │   │   └── messages.ts        # FillCredentialsMessage — Popup → content script, direct
+│       │   │                          # via chrome.tabs.sendMessage, not background's message-bus.ts
 │       │   ├── ui/
 │       │   │   ├── popup/             # Quick-access UI, post-unlock — see §8
 │       │   │   │   ├── index.tsx      # Webpack entry — mounts <App /> into #root
 │       │   │   │   ├── App.tsx        # Locked/unlocked view state machine
 │       │   │   │   └── popup.html
 │       │   │   ├── manager/           # Vault-content management UI, post-unlock only — see §8
+│       │   │   │   ├── index.tsx      # Webpack entry — mounts <App /> into #root
+│       │   │   │   ├── App.tsx        # Group tree + entry list + entry edit/attachments panel
+│       │   │   │   └── manager.html
 │       │   │   └── options/           # Setup + config, reachable pre-unlock — see §8
+│       │   │       ├── index.tsx      # Webpack entry — mounts <App /> into #root
+│       │   │       ├── App.tsx        # Vault file selection + biometric enrollment
+│       │   │       └── options.html   # Replaced src/dev-harness/ (Phase 2's stand-in for
+│       │   │                          # exactly this — file selection) once this became real
 │       │   ├── platform/
 │       │   │   ├── chrome.ts          # Chrome-specific: MV3 service worker, chrome.identity
 │       │   │   ├── firefox.ts         # Firefox-specific: MV2 background page, browser.identity
@@ -343,7 +376,7 @@ Mirror the decryption pipeline in reverse. **Always generate fresh random values
 
 ### 3.4 Session Key Lifecycle
 
-The derived cipher key (output of step 6 above) is the session key. It lives **only** in service worker module-level memory (`@keetar/web`), wrapped/unwrapped via `@keetar/core`'s `session-key.ts`.
+The derived cipher key (output of step 6 above) is the session key. It lives **only** in service worker module-level memory (`@keetar/web`) — never written to storage, wrapped or otherwise. What §6.2's `session-key.ts` actually wraps for biometric unlock is `KdbxCredentials.passwordHash`, not this derived key — see §6.2's note and §2.4's `session-key.ts` entry for why.
 
 - **On lock:** Overwrite the key buffer with zeros, then set reference to `null`
 - **On Chrome MV3 SW termination:** Key is lost — user must re-enter master password (or re-run the biometric/file-permission unlock gesture, §6.2, §4.2). This is correct and expected.
@@ -374,9 +407,11 @@ Everything stored here is either encrypted or non-sensitive metadata. The extens
                              Local-file-backed vaults are re-read from the file handle on
                              every unlock instead (§4.2) and are never cached here.
 /vault-<uuid>.meta.json      { provider, filePath, lastModified, eTag } — cloud vaults only
-/session-<uuid>.bin          AES-KW wrapped session key (32 bytes → 40 bytes encrypted) — all backends
-/biometric-<uuid>.json       { credentialId, prfSalt, enrolledAt } — WebAuthn public info, all backends
-/keysalt-<uuid>.bin          Random 32-byte salt used as PRF eval input during biometric auth
+/biometric-<uuid>.json       { credentialId, prfSalt, wrappedPasswordHash, enrolledAt } — all
+                             backends. One record, not three (§6.2) — credentialId, prfSalt, and
+                             the wrapped hash are always read and written together, so an earlier
+                             draft's split into /session-*.bin + /keysalt-*.bin + /biometric-*.json
+                             just fragmented one logical record across three files for no benefit.
 /keyfile-<uuid>.bin          Key file bytes encrypted with AES-256-GCM + device secret
 /device-secret.bin           Random 256-bit device-local secret (protects key file at rest)
 /settings.json               UI preferences, idle timeout, autofill config — no key material
@@ -525,36 +560,46 @@ Present to user in this order (skip modes that are unavailable):
 
 The PRF (Pseudo-Random Function) extension causes the authenticator to produce a deterministic 32-byte output each time the user authenticates. This output is used as the vault unlock key (VUK) to unwrap the stored session key.
 
-**Enrollment:**
+**Enrollment (Options, §8.2 — needs a live master password, which is why this lives in Options' scoped one-time unlock, not Popup/Manager's shared session):**
 
 ```
-1. Generate 32-byte random prfSalt
-2. Store prfSalt in /keysalt-<uuid>.bin in OPFS
+1. User enters the master password. Verify it's actually correct before enrolling
+   anything — read the vault file (LocalFileProvider, same as any unlock) and
+   attempt Kdbx.load(). If it fails, stop here with "incorrect password": don't
+   let a typo silently brick biometric unlock until the user tries it later.
+2. Generate 32-byte random prfSalt.
 3. Call navigator.credentials.create() with prf extension:
      extensions: { prf: {} }
      user.id = SHA-256(vaultUUID)
 4. VUK = assertion.getClientExtensionResults().prf.results.first  (32 bytes)
-5. AES-KW wrap the current session key using VUK
-6. Store wrapped key in /session-<uuid>.bin
-7. Store credentialId in /biometric-<uuid>.json
-8. Discard VUK from memory immediately
+5. AES-KW wrap credentials.passwordHash (32 bytes — SHA-256 of the master
+   password, not the derived session key; see this section's note above) using VUK
+6. Store { credentialId, prfSalt, wrappedPasswordHash, enrolledAt } as a single
+   OPFS record (§4.1) — one file per vault, not the three separate files
+   (/keysalt-*, /session-*, /biometric-*) an earlier draft of this doc split
+   this into; they're one logical record, always read and written together.
+7. Discard VUK and the verification Kdbx instance from memory immediately.
 ```
 
-**Unlock:**
+**Unlock (Popup, §8.1 — the surface that actually prompts for the master password; shown as an alternative to it when a biometric credential exists for the configured vault):**
 
 ```
-1. Read prfSalt from /keysalt-<uuid>.bin
-2. Read credentialId from /biometric-<uuid>.json
-3. Call navigator.credentials.get():
+1. Read { credentialId, prfSalt, wrappedPasswordHash } from the OPFS record.
+2. Call navigator.credentials.get():
      allowCredentials: [{ id: credentialId, type: 'public-key' }]
      extensions: { prf: { eval: { first: prfSalt } } }
-4. OS performs biometric check (Face ID / Touch ID / Windows Hello / YubiKey)
-5. VUK = assertion.getClientExtensionResults().prf.results.first
-6. AES-KW unwrap /session-<uuid>.bin using VUK → session key in memory
-7. Vault is unlocked. Discard VUK immediately.
+3. OS performs biometric check (Face ID / Touch ID / Windows Hello / YubiKey)
+4. VUK = assertion.getClientExtensionResults().prf.results.first
+5. AES-KW unwrap wrappedPasswordHash using VUK → the 32-byte password hash
+6. Send it to background: construct `new KdbxCredentials(null)`, await
+   `.ready`, then set `.passwordHash` directly (a public field) to that hash
+   before calling `Kdbx.load()` — same unmodified core load path as a normal
+   password unlock from that point on, just skipping the "hash the password
+   string" step, not the Argon2 KDF itself.
+7. Discard VUK immediately. Vault is unlocked.
 ```
 
-If the active backend is the local-file provider (§4.2), fold `handle.requestPermission()` into the same gesture: biometric/password unlock and file-access re-grant happen as one user interaction, not two.
+If the active backend is the local-file provider (§4.2), fold `handle.requestPermission()` into the same gesture: biometric/password unlock and file-access re-grant happen as one user interaction, not two. In practice this holds as long as file permission hasn't actually lapsed (browser restart) — within a session, `LocalFileProvider`'s own permission check (§4.2, §7.2) resolves without a fresh prompt, so the background service worker (which is what actually calls `provider.read()` once Popup hands it the unwrapped hash) doesn't need transient activation of its own. If permission *has* lapsed, that read fails and the user falls back to the password field in the same Popup — which, being a page, always has a fresh gesture available.
 
 > ⚠️ **`file://` origins break PRF in Chrome, Edge, and Safari.** WebAuthn requires an effective domain, which `file://` origins don't have — this is a W3C spec-level restriction ([w3c/webauthn#474](https://github.com/w3c/webauthn/issues/474)), not a bug either browser can fix with a flag. Firefox is the one exception; it allows WebAuthn (and therefore PRF) on `file://`. This extension runs from a `chrome-extension://`/`moz-extension://` origin, not `file://`, so it isn't directly exposed to this — but it matters the moment any companion surface (a locally-opened HTML page, an `<iframe>` pointed at a `file://` doc, etc.) is considered. Master-password unlock has no such restriction and must always work as the universal fallback regardless of origin.
 
@@ -755,6 +800,8 @@ Additionally, the popup sends a ping message to background every 20s while open.
 }
 ```
 
+This is the aspirational end-state manifest (post-OAuth, §7.3) — the actual manifest grows incrementally as each phase needs it, not all at once. Phase 4 (autofill) added its slice: a declarative `content_scripts` entry (`"matches": ["http://*/*", "https://*/*"]`, `content.js`, `"run_at": "document_idle"`) plus `host_permissions` for the same patterns and the `"tabs"` permission — `host_permissions` specifically because `chrome.tabs.query()`'s results only include a tab's `url` for origins the extension has host permission for (MV3 privacy behavior); without it, Popup's active-tab domain matching would silently get back tabs with no `url` field at all. Note `"scripting"` isn't part of Phase 4's manifest: that permission is for *programmatic* injection (`chrome.scripting.executeScript`), a different mechanism from the declarative `content_scripts` array actually used here — don't add it thinking it's required for content scripts in general.
+
 ---
 
 ## 10. Build System & Testing
@@ -768,8 +815,8 @@ Additionally, the popup sends a ping message to background every 20s while open.
 | `background.js` | `src/background/index.ts` | Service worker / background page |
 | `content.js` | `src/autofill/content.ts` | Page context (injected) |
 | `popup/index.js` | `src/ui/popup/index.tsx` | Extension popup, post-unlock. Entry mounts `App.tsx`'s locked/unlocked state machine — not `App.tsx` directly, so the mount call and the component stay separate. |
-| `manager.js` | `src/ui/manager/App.tsx` | Extension tab (full page), post-unlock only |
-| `options.js` | `src/ui/options/App.tsx` | Full options page, reachable pre-unlock |
+| `manager/index.js` | `src/ui/manager/index.tsx` | Extension tab (full page), post-unlock only. Opened via `chrome.tabs.create({ url: chrome.runtime.getURL('manager/manager.html') })` from Popup's "Manage" button, exactly as §8.1 specifies. |
+| `options/index.js` | `src/ui/options/index.tsx` | Full options page, reachable pre-unlock. Replaced `src/dev-harness/`'s file-selection bundle once built for real (Phase 7). |
 
 `@keetar/core` is a normal workspace dependency of `@keetar/web`, not a separate bundle. Build targets: `packages/web/dist/chrome/` and `packages/web/dist/firefox/`. WASM files copy verbatim to `dist/<target>/wasm/argon2/` — do not bundle them. Copied from the `argon2-browser` dependency's own `dist/argon2.{js,wasm}` in `node_modules` at build time, not from a vendored copy in the source tree (§2.4) — see the `webpack.config.js` note there for why.
 
@@ -798,7 +845,14 @@ The crypto and KDBX tests are the only critical-path tests. Do not proceed to Ph
 
 ```js
 const cases = [
-  { entryUrl: 'https://accounts.google.com', tabUrl: 'https://accounts.google.com/login', expectedTier: 1 },
+  { entryUrl: 'https://accounts.google.com', tabUrl: 'https://accounts.google.com',       expectedTier: 1 },
+  // Corrected from an earlier draft, which paired this entryUrl against
+  // 'https://accounts.google.com/login' and expected tier 1 — that pair
+  // actually lands on tier 2 (same hostname, different path: 'login' vs
+  // none), not tier 1 (exact URL string equality). Kept below as its own
+  // case precisely to pin that distinction, since it's an easy one to get
+  // wrong when implementing this table.
+  { entryUrl: 'https://accounts.google.com', tabUrl: 'https://accounts.google.com/login', expectedTier: 2 },
   { entryUrl: 'https://accounts.google.com', tabUrl: 'https://mail.google.com',            expectedTier: 3 },
   { entryUrl: 'https://google.com',          tabUrl: 'https://mail.google.com',            expectedTier: 3 },
   { entryUrl: 'https://github.com',          tabUrl: 'https://gitlab.com',                 expectedTier: null },
@@ -877,10 +931,10 @@ Build in this exact order. Each phase has a testable stopping point. Do not star
 | **1** | Crypto engine + KDBX parser (`@keetar/core`) | `crypto/` and `kdbx/` pass all official KeePass test vectors, in Node, no browser. Test harness only. |
 | **2** | Local-file backend + vault session (`@keetar/web`) | Open a real local `.kdbx` file via the File System Access API, decrypt, hold in memory, lock on idle timeout. Browser console or minimal UI only — in practice this still needs *some* page: `showOpenFilePicker()` requires an active document with a user gesture, which a service worker doesn't have. `src/dev-harness/` fills that gap. Its unlock/view-content responsibility moved to the real Popup once Phase 3 built it; it now stands in only for Options' file-selection piece (§8.2), which doesn't have a real home yet, and should be deleted once Options exists for real. |
 | **3** | Popup UI (read-only) | Show entry list, search, copy username/password to clipboard. No editing, no autofill yet. Built as a locked/unlocked state machine (`App.tsx`) — Popup is the surface that actually prompts for the master password (§4.2, §6.2's "open extension → ... → vault open" describes this gesture), even though §8.1 frames it as "post-unlock": that's its primary/steady-state content, not its only state. `GET_ENTRY_FIELD` returns one field's plaintext at a time, on demand, rather than handing the popup the full entry set — the same "give a surface only what it needs, when it needs it" instinct §5.1 applies to content scripts, applied here even though Popup is trusted (not hostile) — no reason to hold more decrypted material in the popup's own memory than the current action requires. |
-| **4** | Autofill | Content script + domain matching + credential injection. Test manually on 10 real sites including Google and GitHub. |
-| **5** | Write path | `kdbx-format.ts`'s `save()`/`saveV4()` (§2.7 — per-object-model split, not a separate `writer.ts`) — add, edit, delete entries, save back to the local file handle. **Critical:** output must open in KeePassXC desktop without errors. |
-| **6** | Manager UI | Full vault-content management surface (§8), post-unlock only: entry editing, group management, attachments, wired to the write path from Phase 5. |
-| **7** | Biometric unlock | WebAuthn PRF enrolment and unlock, folded into the same gesture as file-handle re-grant (§6.2). Requires real device testing — Touch ID, Windows Hello, and at least one FIDO2 hardware key. |
+| **4** | Autofill | Content script + domain matching + credential injection. Test manually on 10 real sites including Google and GitHub. §5.4's "auto-fill on single match" behavior needs a real preference (idle-timeout-style settings, which live in Options — §8.2) that doesn't exist yet; until Options is built, a single match still only sets the toolbar badge rather than filling automatically — Popup's existing entry list (Phase 3) gained a "Fill" button per row instead of a separate match-list surface, with matched entries sorted to the top. Not verified against any real site yet — that's on whoever's driving a real browser. |
+| **5** | Write path | `kdbx-format.ts`'s `save()`/`saveV4()` (§2.7 — per-object-model split, not a separate `writer.ts`) — add, edit, delete entries, save back to the local file handle. **Critical:** output must open in KeePassXC desktop without errors — not yet verified against the real desktop app; that needs a real machine with KeePassXC installed. `vault-session.ts` gained `createEntry`/`updateEntry`/`deleteEntry`, each auto-saving per §14's decision. No new UI: Manager (Phase 6) is where create/edit/delete actually get a surface — Popup doesn't own editing (§8.2) — so the write path is exercised manually via the service worker's own console (`__keetarDebug.vaultSession`, exposed for exactly this) until then. |
+| **6** | Manager UI | Full vault-content management surface (§8), post-unlock only: entry editing, group management, attachments, wired to the write path from Phase 5. Three-pane layout (group tree / entry list / entry detail); fields auto-save on blur, not per-keystroke, consistent with §14's "save on mutation" decision without re-serializing the whole tree on every character typed. Manager has no unlock flow of its own — it shares Popup's background session (§8.1), so opening it while locked just points the user back at Popup rather than duplicating password entry. TOTP secret setup, import/export, and conflict resolution — also listed under §8.2's Manager ownership — stay out of scope here; those are Phases 8–10's own work, not implied by "wired to the write path." |
+| **7** | Biometric unlock | WebAuthn PRF enrolment and unlock, folded into the same gesture as file-handle re-grant (§6.2). Requires real device testing — Touch ID, Windows Hello, and at least one FIDO2 hardware key — none of which is available from here; nothing about this phase's actual crypto/WebAuthn plumbing has been exercised against real hardware. See §6.2's note for a real design deviation made along the way (AES-KW wraps `KdbxCredentials.passwordHash`, not the derived session key — a deliberate choice to avoid touching core's decrypt pipeline, made together rather than assumed). §6.4's WebHID YubiKey HMAC-SHA1 mode is explicitly out of scope here — it's a separate legacy code path from FIDO2 (which *is* covered, via the same WebAuthn PRF flow as biometric unlock per §6.1), not implied by this phase's stated criteria. Options (§8.2) is now a real, permanent surface — file selection moved out of `src/dev-harness/`, which is now deleted, its purpose fully absorbed. |
 | **8** | TOTP + health | TOTP generation + autofill, HIBP breach checking, password health report (weak, reused, old, breached). |
 | **9** | Import / export | CSV, Bitwarden JSON, 1Password 1PUX, Proton Pass JSON. Export to CSV and XML. |
 | **10** | Cloud providers (deferred, §7.3) | Google Drive first (largest user base), then Dropbox, then OneDrive. One provider at a time. Each must handle offline + conflict cases via the OPFS sync strategy (§4.3). |
@@ -916,7 +970,9 @@ These are not blocking issues but should be resolved early in the relevant phase
 
 **Password generator default** — Characters or words? KeePassXC defaults to characters. Recommendation: character-based default with a toggle to passphrase mode, configurable per-entry. Decide in Phase 3.
 
-**Auto-save behaviour** — Save edits immediately on change, or require an explicit save action? KeePassXC has both modes. Recommendation: explicit save with a dirty indicator — avoids partial saves during flaky cloud connections (and, near-term, avoids surprising writes to a file another sync client may be touching). Decide in Phase 5 (write path); consumed by the Manager UI in Phase 6.
+**Auto-save behaviour — decided in Phase 5: save immediately on every mutation**, not an explicit save action with a dirty indicator as this document originally recommended. Reasoning for overriding that recommendation: the "flaky cloud connections" concern barely applies to the local-file backend that ships first (§7.2) — there's no network involved at all, just a direct local write via the File System Access API — and the "avoid surprising writes to a synced folder" concern is accepted rather than avoided: a synced folder's desktop client (Dropbox, Drive, OneDrive) is expected to reconcile its own cache against a changed local file the same way it does for any other app writing there, not something this extension needs to work around. Once cloud-backed vaults exist (§7.3, Phase 10), the same expectation applies through the OPFS sync strategy (§4.3) — offline edits queue and reconcile on reconnect, rather than the extension avoiding saves to dodge the problem.
+
+Mechanically: `vault-session.ts`'s mutating methods (`createEntry`/`updateEntry`/`deleteEntry`) are `async` and each ends by calling `db.save()` + the configured `FileProvider`'s `write()` before returning. There's no separate dirty flag or save action for Manager (Phase 6) to wire up. If a save fails partway (e.g. permission lapsed), the in-memory edit still stands and gets written on the *next* mutation's save attempt, since every save serializes the full current tree rather than an incremental diff — so there's no separate retry mechanism to build, but a failure is surfaced as an error on the mutation that triggered it, not silently deferred.
 
 **Multiple vaults** — MVP supports one vault only. Multi-vault support complicates the session model and UI significantly. Treat as a post-1.0 feature. Do not design Phase 2/3 in a way that makes it impossible to add later — use vault UUID namespacing in OPFS from the start (§4.1).
 

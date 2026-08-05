@@ -9,5 +9,14 @@
   "action": {
     "default_popup": "popup/popup.html"
   },
-  "permissions": ["storage", "idle", "alarms", "clipboardWrite"]
+  "options_page": "options/options.html",
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "permissions": ["storage", "idle", "alarms", "clipboardWrite", "tabs"]
 }

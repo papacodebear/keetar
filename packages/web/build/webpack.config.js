@@ -6,14 +6,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 
 /**
- * §10.1's five bundles (background/content/popup/manager/options) plus a
- * temporary dev-harness bundle for Phase 2 — only background and dev-harness
- * exist yet; the rest are added as their phases start.
+ * §10.1's five bundles: background, content, popup, manager, options. All
+ * five now exist (Phase 7 added options and retired the temporary
+ * dev-harness bundle that stood in for it since Phase 2).
  *
- * Two separate configs, not one with multiple entries: background.js runs in
- * the service worker (target: 'webworker' — no `document`, no DOM), while
- * dev-harness is a regular extension page (target: 'web'). Webpack's `target`
- * is config-wide, not per-entry, so they can't share one.
+ * Separate config objects, not one config with multiple entries:
+ * background.js runs in the service worker (target: 'webworker' — no
+ * `document`, no DOM), while the rest are regular extension pages (target:
+ * 'web'). Webpack's `target` is config-wide, not per-entry, so they can't
+ * share one.
  */
 export default (_env, argv) => {
     const isProduction = argv.mode === 'production';
@@ -67,9 +68,9 @@ export default (_env, argv) => {
             mode
         },
         {
-            name: 'dev-harness',
-            entry: path.join(rootDir, 'src/dev-harness/index.ts'),
-            output: { path: outputPath, filename: 'dev-harness/index.js' },
+            name: 'options',
+            entry: path.join(rootDir, 'src/ui/options/index.tsx'),
+            output: { path: outputPath, filename: 'options/index.js' },
             target: 'web',
             resolve: { extensions: ['.tsx', '.ts', '.js'] },
             module: { rules: [tsRule] },
@@ -77,12 +78,22 @@ export default (_env, argv) => {
                 new CopyPlugin({
                     patterns: [
                         {
-                            from: path.join(rootDir, 'src/dev-harness/index.html'),
-                            to: 'dev-harness/index.html'
+                            from: path.join(rootDir, 'src/ui/options/options.html'),
+                            to: 'options/options.html'
                         }
                     ]
                 })
             ],
+            devtool,
+            mode
+        },
+        {
+            name: 'content',
+            entry: path.join(rootDir, 'src/autofill/content.ts'),
+            output: { path: outputPath, filename: 'content.js' },
+            target: 'web',
+            resolve: { extensions: ['.tsx', '.ts', '.js'] },
+            module: { rules: [tsRule] },
             devtool,
             mode
         },
@@ -99,6 +110,26 @@ export default (_env, argv) => {
                         {
                             from: path.join(rootDir, 'src/ui/popup/popup.html'),
                             to: 'popup/popup.html'
+                        }
+                    ]
+                })
+            ],
+            devtool,
+            mode
+        },
+        {
+            name: 'manager',
+            entry: path.join(rootDir, 'src/ui/manager/index.tsx'),
+            output: { path: outputPath, filename: 'manager/index.js' },
+            target: 'web',
+            resolve: { extensions: ['.tsx', '.ts', '.js'] },
+            module: { rules: [tsRule] },
+            plugins: [
+                new CopyPlugin({
+                    patterns: [
+                        {
+                            from: path.join(rootDir, 'src/ui/manager/manager.html'),
+                            to: 'manager/manager.html'
                         }
                     ]
                 })

@@ -3,7 +3,6 @@ import { ByteUtils } from '@keetar/core';
 import { createVaultFile, pickVaultFile } from '../../providers/local-file';
 import {
     clearConfiguredVault,
-    consumePendingOpenVaultFlow,
     getConfiguredVault,
     setConfiguredVault,
     type ConfiguredVault,
@@ -47,9 +46,6 @@ export function App() {
         setVault(configured);
         setEnrolled(configured ? await isBiometricEnrolled(configured.uuid) : false);
         setGdriveConnected(await isGoogleDriveConnected());
-        if (!configured && (await consumePendingOpenVaultFlow())) {
-            setMode('open');
-        }
         setLoaded(true);
     }
 
@@ -433,7 +429,13 @@ function SyncBadge({ status }: { status: SyncStatus | 'checking' }) {
 }
 
 // Both local and Drive files as existing sources; Drive connects inline (§8.1).
-function OpenVaultFlow({ onOpened, onCancel }: { onOpened: () => Promise<void>; onCancel: () => void }) {
+function OpenVaultFlow({
+    onOpened,
+    onCancel
+}: {
+    onOpened: () => Promise<void>;
+    onCancel: () => void;
+}) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | undefined>(undefined);
 

@@ -11,6 +11,61 @@ export interface DedupGroup {
     secondary: IdentifiedRecord[];
 }
 
+/** Entries with the same login credentials, regardless of where they are filed. */
+export interface ExactDuplicateGroup {
+    entries: IdentifiedRecord[];
+}
+
+function exactCredentialKey(record: VaultEntryRecord): string | undefined {
+    const username = record.username.trim();
+    const password = record.password;
+    const url = record.url.trim();
+    if (!username || !password || !url) {
+        return undefined;
+    }
+    return `${username}\u0000${password}\u0000${url}`;
+}
+
+/** Finds exact credential duplicates inside one vault. Group paths intentionally do not affect identity. */
+export function findExactDuplicateGroups(records: IdentifiedRecord[]): ExactDuplicateGroup[] {
+    const byKey = new Map<string, IdentifiedRecord[]>();
+    for (const record of records) {
+        const key = exactCredentialKey(record);
+        if (!key) {
+            continue;
+        }
+        const entries = byKey.get(key) ?? [];
+        entries.push(record);
+        byKey.set(key, entries);
+    }
+    return Array.from(byKey.values())
+        .filter((entries) => entries.length > 1)
+        .map((entries) => ({ entries }));
+}
+
+/** Incoming records whose complete credentials already exist in the primary vault. */
+export function findExactDuplicateMatches(
+    primary: IdentifiedRecord[],
+    secondary: IdentifiedRecord[]
+): { primary: IdentifiedRecord; secondary: IdentifiedRecord }[] {
+    const primaryByKey = new Map<string, IdentifiedRecord>();
+    for (const record of primary) {
+        const key = exactCredentialKey(record);
+        if (key && !primaryByKey.has(key)) {
+            primaryByKey.set(key, record);
+        }
+    }
+    const matches: { primary: IdentifiedRecord; secondary: IdentifiedRecord }[] = [];
+    for (const record of secondary) {
+        const key = exactCredentialKey(record);
+        const primaryRecord = key ? primaryByKey.get(key) : undefined;
+        if (primaryRecord) {
+            matches.push({ primary: primaryRecord, secondary: record });
+        }
+    }
+    return matches;
+}
+
 export function matchKey(record: VaultEntryRecord): string | undefined {
     const username = record.username.trim().toLowerCase();
     if (!username) {

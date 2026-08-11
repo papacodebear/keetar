@@ -64,6 +64,18 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
                 type: 'GET_PASSWORD_HEALTH',
                 report: await vaultSession.getPasswordHealth()
             };
+        case 'GET_DUPLICATE_CREDENTIAL_GROUPS':
+            return {
+                ok: true,
+                type: 'GET_DUPLICATE_CREDENTIAL_GROUPS',
+                groups: vaultSession.getDuplicateCredentialGroups()
+            };
+        case 'REMOVE_DUPLICATE_ENTRIES':
+            return {
+                ok: true,
+                type: 'REMOVE_DUPLICATE_ENTRIES',
+                removed: await vaultSession.removeDuplicateEntries(request.keepEntryUuids)
+            };
         case 'LOGIN_FORM_DETECTED': {
             // Update toolbar badge with match count (background decides autofill logic).
             const tabId = sender.tab?.id;

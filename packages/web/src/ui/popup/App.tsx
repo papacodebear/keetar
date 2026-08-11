@@ -5,8 +5,6 @@ import type { EntryFieldName, EntrySummary } from '../../background/vault-sessio
 import {
     clearConfiguredVault,
     getConfiguredVault,
-    setConfiguredVault,
-    setPendingOpenVaultFlow,
     type VaultBackend
 } from '../../config/vault-config';
 import type { FillCredentialsMessage } from '../../autofill/messages';
@@ -14,8 +12,6 @@ import { isBiometricEnrolled, unlockToPasswordHash } from '../../auth/biometric'
 import { isWebAuthnSupported } from '../../auth/webauthn';
 import { EntryIcon } from '../shared/EntryIcon';
 import { tabs } from '../../platform';
-import { createVaultFile, pickVaultFile } from '../../providers/local-file';
-import { createEmptyVaultBytes } from '../../providers/vault-creation';
 
 // Quick access post-unlock: search, copy, fill (§8.1–8.2); also runs WebAuthn unlock ceremony (§6.2).
 
@@ -174,7 +170,7 @@ export function App() {
                 </div>
             );
         case 'no-vault':
-            return <NoVaultView onOpened={refresh} />;
+            return <NoVaultView />;
         case 'locked':
             return (
                 <LockedView
@@ -299,161 +295,21 @@ async function fillActiveTab(
     await chrome.tabs.sendMessage(tab.id, message);
 }
 
-type NoVaultMode = 'idle' | 'open' | 'create';
-
-// Local file picker inline (sync dialog); Drive routes to Options (would kill popup).
-function NoVaultView({ onOpened }: { onOpened: () => Promise<void> }) {
-    const [mode, setMode] = useState<NoVaultMode>('idle');
-
-    return (
-        <div className="panel">
-            <div className="vault-status">
-                <span className="vault-status-name">No vault configured</span>
-                <GearButton />
-            </div>
-            {mode === 'idle' && (
-                <div className="choice-buttons">
-                    <button type="button" onClick={() => setMode('create')}>
-                        Create New Database
-                    </button>
-                    <button type="button" onClick={() => setMode('open')}>
-                        Open Existing Database
-                    </button>
-                </div>
-            )}
-            {mode === 'open' && <OpenVaultFlow onOpened={onOpened} onCancel={() => setMode('idle')} />}
-            {mode === 'create' && <CreateVaultFlow onCreated={onOpened} onCancel={() => setMode('idle')} />}
-        </div>
-    );
-}
-
-function OpenVaultFlow({ onOpened, onCancel }: { onOpened: () => Promise<void>; onCancel: () => void }) {
-    const [busy, setBusy] = useState(false);
-    const [error, setError] = useState<string | undefined>(undefined);
-
-    async function openLocal(): Promise<void> {
-        setBusy(true);
-        setError(undefined);
-        try {
-            const { uuid, name } = await pickVaultFile();
-            await setConfiguredVault({ uuid, name, provider: 'local-file' });
-            await onOpened();
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        } finally {
-            setBusy(false);
-        }
-    }
-
-    // Drive setup needs Options' OAuth flow — hand off with the flow pre-selected, not dropped at Options' idle screen.
-    async function openViaOptions(): Promise<void> {
-        await setPendingOpenVaultFlow();
+function NoVaultView() {
+    function configureDatabase(): void {
         chrome.runtime.openOptionsPage();
         window.close();
     }
 
     return (
-        <div className="panel-box">
-            <p className="hint">Where is the database file?</p>
-            <button type="button" onClick={() => void openLocal()} disabled={busy}>
-                This computer
-            </button>{' '}
-            <button type="button" onClick={() => void openViaOptions()} disabled={busy}>
-                Google Drive…
-            </button>{' '}
-            <button type="button" onClick={onCancel} disabled={busy}>
-                Cancel
-            </button>
-            {error && <p className="error">{error}</p>}
-        </div>
-    );
-}
-
-function CreateVaultFlow({ onCreated, onCancel }: { onCreated: () => Promise<void>; onCancel: () => void }) {
-    const [name, setName] = useState('');
-    const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
-    const [backend, setBackend] = useState<VaultBackend>('local-file');
-    const [busy, setBusy] = useState(false);
-    const [error, setError] = useState<string | undefined>(undefined);
-
-    async function create(e: React.FormEvent): Promise<void> {
-        e.preventDefault();
-        if (backend === 'gdrive') {
-            chrome.runtime.openOptionsPage();
-            return;
-        }
-        if (password !== confirmPassword) {
-            setError('Passwords do not match.');
-            return;
-        }
-        setBusy(true);
-        setError(undefined);
-        try {
-            const data = await createEmptyVaultBytes(name, password);
-            const created = await createVaultFile(name, data);
-            await setConfiguredVault({ uuid: created.uuid, name: created.name, provider: 'local-file' });
-            await onCreated();
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        } finally {
-            setBusy(false);
-        }
-    }
-
-    return (
-        <form className="panel-box" onSubmit={(e) => void create(e)}>
-            <input
-                type="text"
-                placeholder="Vault name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                disabled={busy}
-            />
-            <input
-                type="password"
-                autoComplete="new-password"
-                placeholder="Master password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={busy}
-            />
-            <input
-                type="password"
-                autoComplete="new-password"
-                placeholder="Confirm master password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                disabled={busy}
-            />
-            <label>
-                <input
-                    type="radio"
-                    checked={backend === 'local-file'}
-                    onChange={() => setBackend('local-file')}
-                    disabled={busy}
-                />{' '}
-                Local file
-            </label>{' '}
-            <label>
-                <input
-                    type="radio"
-                    checked={backend === 'gdrive'}
-                    onChange={() => setBackend('gdrive')}
-                    disabled={busy}
-                />{' '}
-                Google Drive
-            </label>
-            <div>
-                <button type="submit" disabled={busy || !name || (backend === 'local-file' && !password)}>
-                    {backend === 'gdrive' ? 'Continue in Options…' : 'Create vault'}
-                </button>{' '}
-                <button type="button" onClick={onCancel} disabled={busy}>
-                    Cancel
-                </button>
+        <div className="panel">
+            <div className="vault-status">
+                <span className="vault-status-name">No vault configured</span>
             </div>
-            {error && <p className="error">{error}</p>}
-        </form>
+            <button type="button" onClick={configureDatabase}>
+                Configure Database
+            </button>
+        </div>
     );
 }
 

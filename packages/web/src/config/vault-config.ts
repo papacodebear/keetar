@@ -26,19 +26,3 @@ export function setConfiguredVault(vault: ConfiguredVault): Promise<void> {
 export function clearConfiguredVault(): Promise<void> {
     return storage.remove(STORAGE_KEY);
 }
-
-const PENDING_OPEN_FLOW_KEY = 'keetar.pendingOpenVaultFlow';
-
-/** Popup sets this before handing off to Options for Drive setup, so Options can skip straight to "Open Existing Database" instead of its idle screen. */
-export function setPendingOpenVaultFlow(): Promise<void> {
-    return storage.set(PENDING_OPEN_FLOW_KEY, true);
-}
-
-/** Options reads and clears this once on load. */
-export async function consumePendingOpenVaultFlow(): Promise<boolean> {
-    const pending = await storage.get<boolean>(PENDING_OPEN_FLOW_KEY);
-    if (pending) {
-        await storage.remove(PENDING_OPEN_FLOW_KEY);
-    }
-    return Boolean(pending);
-}

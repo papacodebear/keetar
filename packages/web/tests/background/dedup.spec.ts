@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
+    findExactDuplicateGroups,
+    findExactDuplicateMatches,
     findDuplicateGroups,
     findNonConflicting,
     isIdenticalMatch,
@@ -21,6 +23,50 @@ function record(overrides: Partial<IdentifiedRecord>): IdentifiedRecord {
         ...overrides
     };
 }
+
+describe('exact credential duplicates', () => {
+    test('groups matching username, password, and URL even when group paths differ', () => {
+        const groups = findExactDuplicateGroups([
+            record({
+                uuid: 'personal',
+                username: 'alice',
+                password: 'correct-horse',
+                url: 'https://example.com/login',
+                group: 'Personal'
+            }),
+            record({
+                uuid: 'work',
+                username: 'alice',
+                password: 'correct-horse',
+                url: 'https://example.com/login',
+                group: 'Work/Shared'
+            })
+        ]);
+
+        expect(groups).toHaveLength(1);
+        expect(groups[0].entries.map((entry) => entry.uuid)).toEqual(['personal', 'work']);
+    });
+
+    test('does not match records missing a credential field', () => {
+        expect(
+            findExactDuplicateGroups([
+                record({ uuid: 'a', username: 'alice', password: 'same', url: '' }),
+                record({ uuid: 'b', username: 'alice', password: 'same', url: '' })
+            ])
+        ).toEqual([]);
+    });
+
+    test('finds incoming exact matches before broader combine conflict matching', () => {
+        const matches = findExactDuplicateMatches(
+            [record({ uuid: 'primary', username: 'alice', password: 'same', url: 'https://example.com' })],
+            [record({ uuid: 'secondary', username: 'alice', password: 'same', url: 'https://example.com', group: 'Elsewhere' })]
+        );
+
+        expect(matches).toEqual([
+            expect.objectContaining({ primary: expect.objectContaining({ uuid: 'primary' }), secondary: expect.objectContaining({ uuid: 'secondary' }) })
+        ]);
+    });
+});
 
 describe('matchKey', () => {
     test('ignores scheme, subdomain, and public suffix', () => {

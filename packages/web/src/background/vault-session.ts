@@ -27,6 +27,8 @@ import { getConfiguredVault } from '../config/vault-config';
 import { createFileProvider } from '../providers';
 import { fetchFaviconPng } from './favicon';
 import {
+    findExactDuplicateGroups,
+    findExactDuplicateMatches,
     findDuplicateGroups,
     findNonConflicting,
     mergeIcon,
@@ -111,6 +113,16 @@ export interface CombineConflict {
     secondary: CombineConflictEntry[];
 }
 
+export interface DuplicateCredentialEntry {
+    uuid: string;
+    title: string;
+    groupPath: string;
+}
+
+export interface DuplicateCredentialGroup {
+    entries: DuplicateCredentialEntry[];
+}
+
 export type CombineResolution = 'keep-a' | 'keep-b' | 'keep-both';
 
 const FIELD_MAP: Record<keyof EntryFields, { kdbxName: string; protectionKey: keyof KdbxMemoryProtection }> = {
@@ -133,7 +145,12 @@ class VaultSession {
     private readonly hibpClient = createHibpClient();
     private secondaryDb: Kdbx | undefined;
     private pendingCombine:
-        | { identicalGroups: DedupGroup[]; divergentGroups: DedupGroup[]; nonConflicting: IdentifiedRecord[] }
+        | {
+              exactMatches: ReturnType<typeof findExactDuplicateMatches>;
+              identicalGroups: DedupGroup[];
+              divergentGroups: DedupGroup[];
+              nonConflicting: IdentifiedRecord[];
+          }
         | undefined;
 
     get status(): VaultSessionState['status'] {
@@ -241,6 +258,43 @@ class VaultSession {
                 lastModified: entry.times.lastModTime
             }));
         return analysePasswordHealth(entries, (password) => this.hibpClient.checkPassword(password));
+    }
+
+    getDuplicateCredentialGroups(): DuplicateCredentialGroup[] {
+        const db = this.requireUnlocked();
+        return findExactDuplicateGroups(kdbxToRecords(db)).map(({ entries }) => ({
+            entries: entries.map((entry) => ({
+                uuid: entry.uuid,
+                title: entry.title,
+                groupPath: entry.group || 'Root'
+            }))
+        }));
+    }
+
+    async removeDuplicateEntries(keepEntryUuids: string[]): Promise<number> {
+        const db = this.requireUnlocked();
+        const groups = findExactDuplicateGroups(kdbxToRecords(db));
+        const selectedUuids = new Set(keepEntryUuids);
+        if (selectedUuids.size !== groups.length) {
+            throw new Error('choose one entry to keep from each duplicate set');
+        }
+
+        const entriesToRemove: IdentifiedRecord[] = [];
+        for (const group of groups) {
+            const selected = group.entries.filter((entry) => selectedUuids.has(entry.uuid));
+            if (selected.length !== 1) {
+                throw new Error('choose one entry to keep from each duplicate set');
+            }
+            entriesToRemove.push(...group.entries.filter((entry) => entry.uuid !== selected[0].uuid));
+        }
+        for (const record of entriesToRemove) {
+            const entry = this.requireEntry(record.uuid);
+            db.remove(entry);
+        }
+        if (entriesToRemove.length > 0) {
+            await this.persist();
+        }
+        return entriesToRemove.length;
     }
 
     // Full vault tree for Manager (§8.2), including recycle bin.
@@ -450,7 +504,7 @@ class VaultSession {
         this.pendingCombine = undefined;
     }
 
-    // Compute conflict groups; auto-resolve identical 1:1 pairs (same password = unchanged entry).
+    // Compute conflict groups; exact credentials are never re-imported, even when their group paths differ.
     previewCombine(): { conflicts: CombineConflict[]; nonConflictingCount: number; identicalCount: number } {
         const db = this.requireUnlocked();
         if (!this.secondaryDb) {
@@ -458,10 +512,13 @@ class VaultSession {
         }
         const primaryRecords = kdbxToRecords(db);
         const secondaryRecords = kdbxToRecords(this.secondaryDb);
-        const allGroups = findDuplicateGroups(primaryRecords, secondaryRecords);
+        const exactMatches = findExactDuplicateMatches(primaryRecords, secondaryRecords);
+        const exactSecondaryUuids = new Set(exactMatches.map((match) => match.secondary.uuid));
+        const candidateSecondaryRecords = secondaryRecords.filter((record) => !exactSecondaryUuids.has(record.uuid));
+        const allGroups = findDuplicateGroups(primaryRecords, candidateSecondaryRecords);
         const { identical, divergent } = partitionByPasswordMatch(allGroups);
-        const nonConflicting = findNonConflicting(secondaryRecords, allGroups);
-        this.pendingCombine = { identicalGroups: identical, divergentGroups: divergent, nonConflicting };
+        const nonConflicting = findNonConflicting(candidateSecondaryRecords, allGroups);
+        this.pendingCombine = { exactMatches, identicalGroups: identical, divergentGroups: divergent, nonConflicting };
         return {
             conflicts: divergent.map((group) => ({
                 key: group.key,
@@ -469,7 +526,7 @@ class VaultSession {
                 secondary: group.secondary.map(toConflictEntry)
             })),
             nonConflictingCount: nonConflicting.length,
-            identicalCount: identical.length
+            identicalCount: exactMatches.length + identical.length
         };
     }
 
@@ -511,7 +568,12 @@ class VaultSession {
             }
         };
 
-        // Auto-resolved identical pairs: still merge non-password fields that may differ.
+        // Exact matches are never imported; retain useful non-credential fields from the incoming record.
+        for (const match of this.pendingCombine.exactMatches) {
+            await mergeInto(match.primary, match.secondary, 'keep-a');
+        }
+
+        // Auto-resolved same-site/password pairs: still merge non-password fields that may differ.
         for (const group of this.pendingCombine.identicalGroups) {
             await mergeInto(group.primary[0], group.secondary[0], 'keep-a');
         }

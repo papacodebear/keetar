@@ -11,6 +11,7 @@ import type { AiSortDiff } from './ai-sort';
 import type {
     CombineConflict,
     CombineResolution,
+    DuplicateCredentialGroup,
     EntryDetail,
     EntrySummary,
     GroupNode,
@@ -129,6 +130,7 @@ function Ready({
 }) {
     const selectedGroup = findGroup(root, selectedGroupUuid) ?? root;
     const [healthReport, setHealthReport] = useState<PasswordHealthReport | undefined>(undefined);
+    const [duplicateGroups, setDuplicateGroups] = useState<DuplicateCredentialGroup[] | undefined>(undefined);
     const [healthError, setHealthError] = useState<string | undefined>(undefined);
     const [checkingHealth, setCheckingHealth] = useState(false);
     const [showImportExport, setShowImportExport] = useState(false);
@@ -164,6 +166,7 @@ function Ready({
 
     function selectEntry(entryUuid: string): void {
         setHealthReport(undefined);
+        setDuplicateGroups(undefined);
         setHealthError(undefined);
         setShowImportExport(false);
         setShowCombine(false);
@@ -173,6 +176,7 @@ function Ready({
 
     function toggleImportExport(): void {
         setHealthReport(undefined);
+        setDuplicateGroups(undefined);
         setHealthError(undefined);
         setShowCombine(false);
         setShowAiSort(false);
@@ -181,6 +185,7 @@ function Ready({
 
     function toggleAiSort(): void {
         setHealthReport(undefined);
+        setDuplicateGroups(undefined);
         setHealthError(undefined);
         setShowImportExport(false);
         setShowCombine(false);
@@ -189,6 +194,7 @@ function Ready({
 
     function toggleCombine(): void {
         setHealthReport(undefined);
+        setDuplicateGroups(undefined);
         setHealthError(undefined);
         setShowImportExport(false);
         setShowAiSort(false);
@@ -199,11 +205,19 @@ function Ready({
         setCheckingHealth(true);
         setHealthError(undefined);
         try {
-            const response = await sendToBackground({ type: 'GET_PASSWORD_HEALTH' });
-            if (response.ok && response.type === 'GET_PASSWORD_HEALTH') {
-                setHealthReport(response.report);
-            } else if (!response.ok) {
-                setHealthError(response.error);
+            const [healthResponse, duplicatesResponse] = await Promise.all([
+                sendToBackground({ type: 'GET_PASSWORD_HEALTH' }),
+                sendToBackground({ type: 'GET_DUPLICATE_CREDENTIAL_GROUPS' })
+            ]);
+            if (healthResponse.ok && healthResponse.type === 'GET_PASSWORD_HEALTH') {
+                setHealthReport(healthResponse.report);
+            } else if (!healthResponse.ok) {
+                setHealthError(healthResponse.error);
+            }
+            if (duplicatesResponse.ok && duplicatesResponse.type === 'GET_DUPLICATE_CREDENTIAL_GROUPS') {
+                setDuplicateGroups(duplicatesResponse.groups);
+            } else if (!duplicatesResponse.ok) {
+                setHealthError(duplicatesResponse.error);
             }
         } finally {
             setCheckingHealth(false);
@@ -280,7 +294,7 @@ function Ready({
     async function disconnectVault(): Promise<void> {
         await sendToBackground({ type: 'LOCK_VAULT' });
         await clearConfiguredVault();
-        await onReload();
+        window.location.replace(chrome.runtime.getURL('options/options.html'));
     }
 
     async function emptyRecycleBin(): Promise<void> {
@@ -452,7 +466,18 @@ function Ready({
                         onClose={() => setShowAiSort(false)}
                     />
                 ) : healthReport ? (
-                    <PasswordHealthPanel report={healthReport} onClose={() => setHealthReport(undefined)} />
+                    <PasswordHealthPanel
+                        report={healthReport}
+                        duplicateGroups={duplicateGroups ?? []}
+                        onDuplicatesRemoved={() => {
+                            void onReload({ groupUuid: selectedGroupUuid });
+                            void loadPasswordHealth();
+                        }}
+                        onClose={() => {
+                            setHealthReport(undefined);
+                            setDuplicateGroups(undefined);
+                        }}
+                    />
                 ) : healthError ? (
                     <div className="empty-state">
                         <p>{healthError}</p>
@@ -480,7 +505,53 @@ function titleFor(report: PasswordHealthReport, entryUuid: string): string {
     return report.findings.find((f) => f.entryUuid === entryUuid)?.title || '(no title)';
 }
 
-function PasswordHealthPanel({ report, onClose }: { report: PasswordHealthReport; onClose: () => void }) {
+function duplicateGroupId(group: DuplicateCredentialGroup): string {
+    return group.entries.map((entry) => entry.uuid).sort().join('|');
+}
+
+function PasswordHealthPanel({
+    report,
+    duplicateGroups,
+    onDuplicatesRemoved,
+    onClose
+}: {
+    report: PasswordHealthReport;
+    duplicateGroups: DuplicateCredentialGroup[];
+    onDuplicatesRemoved: () => void;
+    onClose: () => void;
+}) {
+    const [showDuplicateReview, setShowDuplicateReview] = useState(false);
+    const [keptEntryUuids, setKeptEntryUuids] = useState<Record<string, string>>({});
+    const [removingDuplicates, setRemovingDuplicates] = useState(false);
+    const [duplicateError, setDuplicateError] = useState<string | undefined>(undefined);
+    const duplicateEntryCount = duplicateGroups.reduce((count, group) => count + group.entries.length - 1, 0);
+
+    useEffect(() => {
+        setKeptEntryUuids(
+            Object.fromEntries(duplicateGroups.map((group) => [duplicateGroupId(group), group.entries[0]?.uuid ?? '']))
+        );
+        setShowDuplicateReview(false);
+        setDuplicateError(undefined);
+    }, [duplicateGroups]);
+
+    async function removeDuplicates(): Promise<void> {
+        setRemovingDuplicates(true);
+        setDuplicateError(undefined);
+        try {
+            const response = await sendToBackground({
+                type: 'REMOVE_DUPLICATE_ENTRIES',
+                keepEntryUuids: Object.values(keptEntryUuids)
+            });
+            if (!response.ok || response.type !== 'REMOVE_DUPLICATE_ENTRIES') {
+                setDuplicateError(!response.ok ? response.error : 'Could not remove duplicate entries.');
+                return;
+            }
+            onDuplicatesRemoved();
+        } finally {
+            setRemovingDuplicates(false);
+        }
+    }
+
     return (
         <div>
             <div className="middle-pane-header">
@@ -489,6 +560,49 @@ function PasswordHealthPanel({ report, onClose }: { report: PasswordHealthReport
                     Close
                 </button>
             </div>
+            {duplicateEntryCount > 0 && (
+                <div className="field">
+                    <p>
+                        Discovered {duplicateEntryCount} duplicate {duplicateEntryCount === 1 ? 'entry' : 'entries'}.{' '}
+                        <button type="button" onClick={() => setShowDuplicateReview((shown) => !shown)}>
+                            Remove Duplicates
+                        </button>
+                    </p>
+                    {showDuplicateReview && (
+                        <>
+                            {duplicateGroups.map((group) => {
+                                const groupId = duplicateGroupId(group);
+                                return (
+                                    <fieldset key={groupId} className="field">
+                                        <legend>Keep one entry</legend>
+                                        <ul className="health-list">
+                                            {group.entries.map((entry) => (
+                                                <li key={entry.uuid} className="health-row">
+                                                    <label>
+                                                        <input
+                                                            type="radio"
+                                                            name={groupId}
+                                                            checked={keptEntryUuids[groupId] === entry.uuid}
+                                                            onChange={() =>
+                                                                setKeptEntryUuids((kept) => ({ ...kept, [groupId]: entry.uuid }))
+                                                            }
+                                                        />{' '}
+                                                        {entry.groupPath}: {entry.title || '(no title)'}
+                                                    </label>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </fieldset>
+                                );
+                            })}
+                            <button type="button" disabled={removingDuplicates} onClick={() => void removeDuplicates()}>
+                                {removingDuplicates ? 'Moving…' : 'Move Duplicates to Recycle Bin'}
+                            </button>
+                        </>
+                    )}
+                    {duplicateError && <p className="empty-state">{duplicateError}</p>}
+                </div>
+            )}
             <p>
                 {report.total} entries: {report.weak} weak, {report.reused} reused, {report.old} old, {report.breached}{' '}
                 breached, {report.similar} similar to another entry.

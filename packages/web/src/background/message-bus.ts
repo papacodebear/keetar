@@ -5,6 +5,7 @@ import type {
     EntryFieldName,
     EntryFields,
     EntrySummary,
+    DuplicateCredentialGroup,
     GroupNode,
     GroupSummary,
     PasswordHealthReport,
@@ -28,6 +29,8 @@ export type KeetarRequest =
     | { type: 'GET_ENTRY_FIELD'; entryUuid: string; field: EntryFieldName }
     | { type: 'GET_ENTRY_TOTP'; entryUuid: string }
     | { type: 'GET_PASSWORD_HEALTH' }
+    | { type: 'GET_DUPLICATE_CREDENTIAL_GROUPS' }
+    | { type: 'REMOVE_DUPLICATE_ENTRIES'; keepEntryUuids: string[] }
     | { type: 'LOGIN_FORM_DETECTED' }
     | { type: 'MATCH_ENTRIES'; tabUrl: string }
     | { type: 'CREATE_ENTRY'; groupUuid: string; fields: EntryFields }
@@ -71,6 +74,8 @@ export type KeetarResponse =
     | { ok: true; type: 'GET_ENTRY_FIELD'; value: string }
     | { ok: true; type: 'GET_ENTRY_TOTP'; code: string; remainingSeconds: number }
     | { ok: true; type: 'GET_PASSWORD_HEALTH'; report: PasswordHealthReport }
+    | { ok: true; type: 'GET_DUPLICATE_CREDENTIAL_GROUPS'; groups: DuplicateCredentialGroup[] }
+    | { ok: true; type: 'REMOVE_DUPLICATE_ENTRIES'; removed: number }
     | { ok: true; type: 'LOGIN_FORM_DETECTED' }
     | { ok: true; type: 'MATCH_ENTRIES'; matches: MatchResult[] }
     | { ok: true; type: 'CREATE_ENTRY'; entry: EntrySummary }

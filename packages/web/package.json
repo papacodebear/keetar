@@ -12,6 +12,7 @@
     "clean": "rimraf dist",
     "clean:chrome": "rimraf dist/chrome",
     "clean:firefox": "rimraf dist/firefox",
+    "generate:icons": "node scripts/generate-icons.mjs",
     "build": "pnpm run build:chrome && pnpm run build:firefox",
     "build:chrome": "pnpm run clean:chrome && webpack --config build/webpack.config.js --mode production --env browser=chrome",
     "build:dev": "pnpm run clean:chrome && webpack --config build/webpack.config.js --mode development --env browser=chrome",
@@ -30,6 +31,7 @@
     "tldts": "^6.1.0"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@types/chrome": "^0.0.280",
     "@types/node": "^24.0.0",
     "@types/react": "^18.3.0",

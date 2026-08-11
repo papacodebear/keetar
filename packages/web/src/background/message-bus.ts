@@ -17,6 +17,11 @@ import { runtime } from '../platform';
 
 // Typed message router between popup/manager/content/background (§2.4).
 
+export interface PageEntryMatch {
+    uuid: string;
+    title: string;
+}
+
 export type KeetarRequest =
     | { type: 'UNLOCK_VAULT'; uuid: string; password: string }
     // Biometric unlock with pre-unwrapped hash (§6.2); use base64 for JSON-ifiable payload.
@@ -32,6 +37,8 @@ export type KeetarRequest =
     | { type: 'GET_DUPLICATE_CREDENTIAL_GROUPS' }
     | { type: 'REMOVE_DUPLICATE_ENTRIES'; keepEntryUuids: string[] }
     | { type: 'LOGIN_FORM_DETECTED' }
+    | { type: 'GET_PAGE_ENTRY_MATCHES' }
+    | { type: 'FILL_PAGE_ENTRY'; entryUuid: string }
     | { type: 'MATCH_ENTRIES'; tabUrl: string }
     | { type: 'CREATE_ENTRY'; groupUuid: string; fields: EntryFields }
     | { type: 'UPDATE_ENTRY'; entryUuid: string; fields: EntryFields }
@@ -77,6 +84,8 @@ export type KeetarResponse =
     | { ok: true; type: 'GET_DUPLICATE_CREDENTIAL_GROUPS'; groups: DuplicateCredentialGroup[] }
     | { ok: true; type: 'REMOVE_DUPLICATE_ENTRIES'; removed: number }
     | { ok: true; type: 'LOGIN_FORM_DETECTED' }
+    | { ok: true; type: 'GET_PAGE_ENTRY_MATCHES'; matches: PageEntryMatch[] }
+    | { ok: true; type: 'FILL_PAGE_ENTRY' }
     | { ok: true; type: 'MATCH_ENTRIES'; matches: MatchResult[] }
     | { ok: true; type: 'CREATE_ENTRY'; entry: EntrySummary }
     | { ok: true; type: 'UPDATE_ENTRY' }

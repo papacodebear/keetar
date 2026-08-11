@@ -141,12 +141,11 @@ function present(
 }
 
 function query(root: ParentNode, selector: string): HTMLInputElement | undefined {
-    const el = root.querySelector(selector);
-    return el instanceof HTMLInputElement ? el : undefined;
+    return queryAll(root, selector)[0];
 }
 
 function queryAll(root: ParentNode, selector: string): HTMLInputElement[] {
     return Array.from(root.querySelectorAll(selector)).filter(
-        (el): el is HTMLInputElement => el instanceof HTMLInputElement
+        (el): el is HTMLInputElement => el instanceof HTMLInputElement && el.getClientRects().length > 0
     );
 }

@@ -30,6 +30,10 @@ async function ensureGoogleDriveAuthorized(): Promise<void> {
     }
 }
 
+function isFilePickerCancellation(error: unknown): boolean {
+    return error instanceof DOMException && error.name === 'AbortError';
+}
+
 export function App() {
     const [vault, setVault] = useState<ConfiguredVault | undefined>(undefined);
     const [enrolled, setEnrolled] = useState(false);
@@ -150,7 +154,9 @@ function DatabaseSection({
             }
             await onChanged();
         } catch (e) {
-            setPickError(e instanceof Error ? e.message : String(e));
+            if (!isFilePickerCancellation(e)) {
+                setPickError(e instanceof Error ? e.message : String(e));
+            }
         } finally {
             setPickBusy(false);
         }
@@ -447,7 +453,9 @@ function OpenVaultFlow({
             await setConfiguredVault({ uuid, name, provider: 'local-file' });
             await onOpened();
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
+            if (!isFilePickerCancellation(e)) {
+                setError(e instanceof Error ? e.message : String(e));
+            }
         } finally {
             setBusy(false);
         }
@@ -559,7 +567,9 @@ function CreateVaultSection({
             setMessage({ text: 'Vault created.', kind: 'success' });
             await onChanged();
         } catch (e) {
-            setMessage({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
+            if (!isFilePickerCancellation(e)) {
+                setMessage({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
+            }
         } finally {
             setBusy(false);
         }

@@ -174,6 +174,13 @@ function Ready({
         void onReload({ groupUuid: selectedGroupUuid, entryUuid });
     }
 
+    function openEntryUrl(url: string): void {
+        const destination = toWebUrl(url);
+        if (destination) {
+            void chrome.tabs.create({ url: destination });
+        }
+    }
+
     function toggleImportExport(): void {
         setHealthReport(undefined);
         setDuplicateGroups(undefined);
@@ -430,6 +437,7 @@ function Ready({
                         key={entry.uuid}
                         className={`entry-row${entry.uuid === selectedEntryUuid ? ' selected' : ''}`}
                         onClick={() => selectEntry(entry.uuid)}
+                        onDoubleClick={() => openEntryUrl(entry.urls[0] ?? '')}
                     >
                         <EntryIcon entryUuid={entry.uuid} icon={entry.icon} hasCustomIcon={entry.hasCustomIcon} />
                         <div className="entry-row-text">
@@ -1278,6 +1286,15 @@ function findGroup(node: GroupNode, uuid: string): GroupNode | undefined {
     return flattenGroups(node).find((g) => g.uuid === uuid);
 }
 
+function toWebUrl(value: string): string | undefined {
+    try {
+        const url = new URL(value.trim());
+        return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 function EntryDetailPanel({
     entryUuid,
     root,
@@ -1290,6 +1307,7 @@ function EntryDetailPanel({
     onDeleted: () => void;
 }) {
     const [entry, setEntry] = useState<EntryDetail | undefined>(undefined);
+    const [urlValue, setUrlValue] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [savedFlash, setSavedFlash] = useState(false);
     const [fetchingFavicon, setFetchingFavicon] = useState(false);
@@ -1303,6 +1321,7 @@ function EntryDetailPanel({
         const response = await sendToBackground({ type: 'GET_ENTRY_DETAIL', entryUuid });
         if (response.ok && response.type === 'GET_ENTRY_DETAIL') {
             setEntry(response.entry);
+            setUrlValue(response.entry.url);
         }
     }
 
@@ -1381,6 +1400,13 @@ function EntryDetailPanel({
         URL.revokeObjectURL(url);
     }
 
+    function openUrl(): void {
+        const destination = toWebUrl(urlValue);
+        if (destination) {
+            void chrome.tabs.create({ url: destination });
+        }
+    }
+
     if (!entry) {
         return <p>Loading…</p>;
     }
@@ -1421,7 +1447,17 @@ function EntryDetailPanel({
             </div>
             <div className="field">
                 <label>URL</label>
-                <input type="text" defaultValue={entry.url} onBlur={(e) => void saveField('url', e.target.value)} />
+                <div className="url-row">
+                    <input
+                        type="text"
+                        value={urlValue}
+                        onChange={(e) => setUrlValue(e.target.value)}
+                        onBlur={(e) => void saveField('url', e.target.value)}
+                    />
+                    <button type="button" onClick={openUrl} disabled={!toWebUrl(urlValue)} title="Open website">
+                        Go
+                    </button>
+                </div>
             </div>
             <div className="field">
                 <label>Notes</label>

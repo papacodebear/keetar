@@ -42,6 +42,9 @@ export const runtime = {
 export const tabs = {
     query(queryInfo: { active: boolean; currentWindow: boolean }): Promise<chrome.tabs.Tab[]> {
         return chrome.tabs.query(queryInfo);
+    },
+    sendMessage(tabId: number, message: unknown): Promise<void> {
+        return chrome.tabs.sendMessage(tabId, message);
     }
 };
 

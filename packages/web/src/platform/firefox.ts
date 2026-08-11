@@ -25,6 +25,7 @@ declare const browser: {
     };
     tabs: {
         query(queryInfo: { active: boolean; currentWindow: boolean }): Promise<chrome.tabs.Tab[]>;
+        sendMessage(tabId: number, message: unknown): Promise<void>;
     };
 };
 
@@ -71,6 +72,9 @@ export const runtime = {
 export const tabs = {
     query(queryInfo: { active: boolean; currentWindow: boolean }): Promise<chrome.tabs.Tab[]> {
         return browser.tabs.query(queryInfo);
+    },
+    sendMessage(tabId: number, message: unknown): Promise<void> {
+        return browser.tabs.sendMessage(tabId, message);
     }
 };
 

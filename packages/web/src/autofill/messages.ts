@@ -5,3 +5,9 @@ export interface FillCredentialsMessage {
     password?: string;
     otp?: string;
 }
+
+export interface RedetectLoginFormMessage {
+    type: 'REDETECT_LOGIN_FORM';
+}
+
+export type ContentScriptMessage = FillCredentialsMessage | RedetectLoginFormMessage;

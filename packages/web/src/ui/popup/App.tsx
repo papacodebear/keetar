@@ -7,7 +7,7 @@ import {
     getConfiguredVault,
     type VaultBackend
 } from '../../config/vault-config';
-import type { FillCredentialsMessage } from '../../autofill/messages';
+import type { ContentScriptMessage, FillCredentialsMessage } from '../../autofill/messages';
 import { isBiometricEnrolled, unlockToPasswordHash } from '../../auth/biometric';
 import { isWebAuthnSupported } from '../../auth/webauthn';
 import { EntryIcon } from '../shared/EntryIcon';
@@ -295,6 +295,15 @@ async function fillActiveTab(
     await chrome.tabs.sendMessage(tab.id, message);
 }
 
+async function redetectActiveTab(): Promise<void> {
+    const [tab] = await tabs.query({ active: true, currentWindow: true });
+    if (tab?.id === undefined) {
+        return;
+    }
+    const message: ContentScriptMessage = { type: 'REDETECT_LOGIN_FORM' };
+    await chrome.tabs.sendMessage(tab.id, message);
+}
+
 function NoVaultView() {
     function configureDatabase(): void {
         chrome.runtime.openOptionsPage();
@@ -454,6 +463,15 @@ function UnlockedView({
         showToast('Filled');
     }
 
+    async function redetectFields(): Promise<void> {
+        try {
+            await redetectActiveTab();
+            showToast('Checked for login fields');
+        } catch {
+            showToast('Cannot inspect this page');
+        }
+    }
+
     async function copyTotp(entryUuid: string): Promise<void> {
         const response = await sendToBackground({ type: 'GET_ENTRY_TOTP', entryUuid });
         if (response.ok && response.type === 'GET_ENTRY_TOTP') {
@@ -494,6 +512,9 @@ function UnlockedView({
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />
+                <button type="button" onClick={() => void redetectFields()} title="Detect login fields on this page">
+                    Detect fields
+                </button>
             </div>
             <button type="button" className="view-all-button" onClick={openManager}>
                 View all entries &amp; groups

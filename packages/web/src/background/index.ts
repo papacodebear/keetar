@@ -10,7 +10,7 @@ import { installArgon2 } from './argon2-wasm';
 import { vaultSession } from './vault-session';
 import { registerMessageHandler, type KeetarResponse } from './message-bus';
 import { startKeepalive } from './keepalive';
-import { action, idle } from '../platform';
+import { action, idle, tabs } from '../platform';
 import { matchEntries } from '../autofill/matcher';
 
 // Entry point — registers listeners, initialises session (§2.4).
@@ -88,6 +88,34 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
                 });
             }
             return { ok: true, type: 'LOGIN_FORM_DETECTED' };
+        }
+        case 'GET_PAGE_ENTRY_MATCHES': {
+            const tabUrl = sender.tab?.url;
+            if (!tabUrl) {
+                return { ok: true, type: 'GET_PAGE_ENTRY_MATCHES', matches: [] };
+            }
+            const entries = vaultSession.listEntries();
+            const entryTitles = new Map(entries.map((entry) => [entry.uuid, entry.title]));
+            return {
+                ok: true,
+                type: 'GET_PAGE_ENTRY_MATCHES',
+                matches: matchEntries(entries, tabUrl).map((match) => ({
+                    uuid: match.uuid,
+                    title: entryTitles.get(match.uuid) ?? ''
+                }))
+            };
+        }
+        case 'FILL_PAGE_ENTRY': {
+            const tabId = sender.tab?.id;
+            if (tabId === undefined) {
+                throw new Error('entry can only be filled from a browser tab');
+            }
+            const [username, password] = [
+                vaultSession.getEntryField(request.entryUuid, 'username'),
+                vaultSession.getEntryField(request.entryUuid, 'password')
+            ];
+            await tabs.sendMessage(tabId, { type: 'FILL_CREDENTIALS', username, password });
+            return { ok: true, type: 'FILL_PAGE_ENTRY' };
         }
         case 'MATCH_ENTRIES':
             return {

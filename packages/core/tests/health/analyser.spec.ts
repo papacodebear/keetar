@@ -81,14 +81,14 @@ describe('password health analysis', () => {
         await expect(estimatePasswordEntropy(password)).resolves.toBeCloseTo((entropy / 256) * password.length, 8);
     });
 
-    test('uses KeePassXC\'s 75-bit threshold for weak passwords', async () => {
+    test('calibrates the JavaScript zxcvbn threshold to KeePassXC near the weak boundary', async () => {
         const report = await analysePasswordHealth(
             [
-                { uuid: 'weak', title: 'Weak', password: 'Yohb2ChR4' },
+                { uuid: 'weak', title: 'Weak', password: 'velvet-guitar-sunset-harbor!' },
                 {
                     uuid: 'strong',
                     title: 'Strong',
-                    password: 'prompter-ream-oversleep-step-extortion-quarrel-reflected-prefix'
+                    password: 'saffron-lantern-meadow-compass'
                 }
             ],
             async () => 0

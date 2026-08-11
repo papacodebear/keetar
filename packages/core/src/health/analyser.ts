@@ -29,7 +29,9 @@ export interface PasswordHealthReport {
 export type PasswordBreachChecker = (password: string) => Promise<number>;
 
 const PASSWORD_MAX_AGE_DAYS = 365;
-const WEAK_PASSWORD_ENTROPY_BITS = 75;
+// KeePassXC's zxcvbn implementation differs slightly from the JavaScript package used here.
+// This calibrated cutoff preserves KeePassXC's weak/non-weak boundary for representative passwords.
+const WEAK_PASSWORD_ENTROPY_BITS = 73;
 const ZXCVBN_ESTIMATE_THRESHOLD = 256;
 // Edit-distance ratio above which two distinct passwords count as "similar" (1.0 = identical, already covered by reused).
 const SIMILAR_PASSWORD_THRESHOLD = 0.7;

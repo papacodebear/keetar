@@ -129,6 +129,7 @@ function Ready({
     onReload: (keepSelection?: { groupUuid: string; entryUuid?: string }) => Promise<void>;
 }) {
     const selectedGroup = findGroup(root, selectedGroupUuid) ?? root;
+    const selectedGroupIsInRecycleBin = isGroupInRecycleBin(root, selectedGroupUuid, recycleBinGroupUuid);
     const [healthReport, setHealthReport] = useState<PasswordHealthReport | undefined>(undefined);
     const [duplicateGroups, setDuplicateGroups] = useState<DuplicateCredentialGroup[] | undefined>(undefined);
     const [healthError, setHealthError] = useState<string | undefined>(undefined);
@@ -409,6 +410,7 @@ function Ready({
                     onCreateChild={createGroup}
                     onRename={renameGroup}
                     onDelete={deleteGroup}
+                    isInRecycleBin={false}
                     isRoot
                 />
             </div>
@@ -423,11 +425,11 @@ function Ready({
                         >
                             Empty Recycle Bin
                         </button>
-                    ) : (
+                    ) : !selectedGroupIsInRecycleBin ? (
                         <button type="button" onClick={() => void createEntry()}>
                             + Entry
                         </button>
-                    )}
+                    ) : null}
                 </div>
                 {displayedEntries.length === 0 && (
                     <p className="empty-state">{search.trim() ? 'No matching entries.' : 'No entries in this group.'}</p>
@@ -498,6 +500,7 @@ function Ready({
                         key={selectedEntryUuid}
                         entryUuid={selectedEntryUuid}
                         root={root}
+                        recycleBinGroupUuid={recycleBinGroupUuid}
                         onChanged={() => onReload({ groupUuid: selectedGroupUuid, entryUuid: selectedEntryUuid })}
                         onDeleted={() => onReload({ groupUuid: selectedGroupUuid })}
                     />
@@ -1174,6 +1177,7 @@ function GroupTreeNode({
     onCreateChild,
     onRename,
     onDelete,
+    isInRecycleBin,
     isRoot
 }: {
     node: GroupNode;
@@ -1184,8 +1188,10 @@ function GroupTreeNode({
     onCreateChild: (parentUuid: string) => Promise<void>;
     onRename: (uuid: string, currentName: string) => Promise<void>;
     onDelete: (uuid: string) => Promise<void>;
+    isInRecycleBin: boolean;
     isRoot?: boolean;
 }) {
+    const isRecycleBin = node.uuid === recycleBinGroupUuid;
     // Recycle Bin always sorts to the bottom, set off by a separator, instead of wherever its name lands alphabetically.
     const regularGroups = node.groups.filter((group) => group.uuid !== recycleBinGroupUuid);
     const recycleBin = node.groups.find((group) => group.uuid === recycleBinGroupUuid);
@@ -1196,45 +1202,48 @@ function GroupTreeNode({
                 onClick={() => onSelect(node.uuid)}
             >
                 <span className="tree-node-name">{node.name || '(unnamed)'}</span>
-                <span className="tree-node-actions">
-                    <button
-                        type="button"
-                        className="icon-button"
-                        title="New subgroup"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            void onCreateChild(node.uuid);
-                        }}
-                    >
-                        +
-                    </button>
-                    {!isRoot && (
-                        <>
-                            <button
-                                type="button"
-                                className="icon-button"
-                                title="Rename"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    void onRename(node.uuid, node.name);
-                                }}
-                            >
-                                ✎
-                            </button>
-                            <button
-                                type="button"
-                                className="icon-button danger"
-                                title="Delete"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    void onDelete(node.uuid);
-                                }}
-                            >
-                                ×
-                            </button>
-                        </>
-                    )}
-                </span>
+                {isRecycleBin && <span className="recycle-bin-icon" aria-hidden="true">🗑</span>}
+                {!isInRecycleBin && (
+                    <span className="tree-node-actions">
+                        <button
+                            type="button"
+                            className="icon-button"
+                            title="New subgroup"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                void onCreateChild(node.uuid);
+                            }}
+                        >
+                            +
+                        </button>
+                        {!isRoot && (
+                            <>
+                                <button
+                                    type="button"
+                                    className="icon-button"
+                                    title="Rename"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        void onRename(node.uuid, node.name);
+                                    }}
+                                >
+                                    ✎
+                                </button>
+                                <button
+                                    type="button"
+                                    className="icon-button danger"
+                                    title="Delete"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        void onDelete(node.uuid);
+                                    }}
+                                >
+                                    ×
+                                </button>
+                            </>
+                        )}
+                    </span>
+                )}
             </div>
             {node.groups.length > 0 && (
                 <div className="tree-children">
@@ -1249,6 +1258,7 @@ function GroupTreeNode({
                             onCreateChild={onCreateChild}
                             onRename={onRename}
                             onDelete={onDelete}
+                            isInRecycleBin={isInRecycleBin}
                         />
                     ))}
                     {recycleBin && (
@@ -1264,6 +1274,7 @@ function GroupTreeNode({
                                 onCreateChild={onCreateChild}
                                 onRename={onRename}
                                 onDelete={onDelete}
+                                isInRecycleBin
                             />
                         </>
                     )}
@@ -1286,6 +1297,11 @@ function findGroup(node: GroupNode, uuid: string): GroupNode | undefined {
     return flattenGroups(node).find((g) => g.uuid === uuid);
 }
 
+function isGroupInRecycleBin(root: GroupNode, groupUuid: string, recycleBinGroupUuid: string | undefined): boolean {
+    const recycleBin = recycleBinGroupUuid ? findGroup(root, recycleBinGroupUuid) : undefined;
+    return !!recycleBin && !!findGroup(recycleBin, groupUuid);
+}
+
 function toWebUrl(value: string): string | undefined {
     try {
         const url = new URL(value.trim());
@@ -1298,11 +1314,13 @@ function toWebUrl(value: string): string | undefined {
 function EntryDetailPanel({
     entryUuid,
     root,
+    recycleBinGroupUuid,
     onChanged,
     onDeleted
 }: {
     entryUuid: string;
     root: GroupNode;
+    recycleBinGroupUuid: string | undefined;
     onChanged: () => void;
     onDeleted: () => void;
 }) {
@@ -1411,6 +1429,8 @@ function EntryDetailPanel({
         return <p>Loading…</p>;
     }
 
+    const isInRecycleBin = isGroupInRecycleBin(root, entry.groupUuid, recycleBinGroupUuid);
+
     return (
         <div>
             <div className="entry-detail-header">
@@ -1506,9 +1526,11 @@ function EntryDetailPanel({
             <p style={{ marginTop: '1rem' }}>
                 {savedFlash && <span className="save-indicator">Saved</span>}
             </p>
-            <button type="button" className="danger" onClick={() => void deleteEntry()}>
-                Delete entry
-            </button>
+            {!isInRecycleBin && (
+                <button type="button" className="danger" onClick={() => void deleteEntry()}>
+                    Delete entry
+                </button>
+            )}
         </div>
     );
 }

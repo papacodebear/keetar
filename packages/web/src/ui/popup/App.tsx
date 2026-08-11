@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ByteUtils } from '@keetar/core';
 import { sendToBackground } from '../../background/message-bus';
 import type { EntryFieldName, EntrySummary } from '../../background/vault-session';
@@ -343,6 +343,11 @@ function LockedView({
 }) {
     const [password, setPassword] = useState('');
     const [busy, setBusy] = useState(false);
+    const passwordInput = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        passwordInput.current?.focus();
+    }, []);
 
     async function submit(e: React.FormEvent): Promise<void> {
         e.preventDefault();
@@ -372,8 +377,8 @@ function LockedView({
                 </button>
             )}
             <input
+                ref={passwordInput}
                 type="password"
-                autoFocus
                 autoComplete="off"
                 placeholder="Master password"
                 value={password}
@@ -408,36 +413,8 @@ function UnlockedView({
     onLock: () => Promise<void>;
     onDisconnect: () => Promise<void>;
 }) {
-    const [search, setSearch] = useState('');
-    const [searchResults, setSearchResults] = useState<EntrySummary[] | undefined>(undefined);
     const [toast, setToast] = useState('');
-
-    // Password matching runs in the background, not here — passwords never enter this state (§8.2).
-    useEffect(() => {
-        const term = search.trim();
-        if (!term) {
-            setSearchResults(undefined);
-            return;
-        }
-        const handle = setTimeout(() => {
-            void sendToBackground({ type: 'SEARCH_ENTRIES', query: term }).then((response) => {
-                if (response.ok && response.type === 'SEARCH_ENTRIES') {
-                    setSearchResults(response.entries);
-                }
-            });
-        }, 150);
-        return () => clearTimeout(handle);
-    }, [search]);
-
-    const filtered = useMemo(() => {
-        const list = searchResults ?? entries;
-        // Sort page matches first; search still works over all entries (§5.4).
-        return [...list].sort((a, b) => {
-            const aMatch = matchedUuids.has(a.uuid) ? 0 : 1;
-            const bMatch = matchedUuids.has(b.uuid) ? 0 : 1;
-            return aMatch - bMatch;
-        });
-    }, [entries, searchResults, matchedUuids]);
+    const matchedEntries = entries.filter((entry) => matchedUuids.has(entry.uuid));
 
     function showToast(message: string): void {
         setToast(message);
@@ -504,14 +481,6 @@ function UnlockedView({
                 onDisconnect={onDisconnect}
             />
             <div className="toolbar">
-                <input
-                    type="text"
-                    autoFocus
-                    placeholder="Search"
-                    title="Searches title, username, URL, and password"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                />
                 <button type="button" onClick={() => void redetectFields()} title="Detect login fields on this page">
                     Detect fields
                 </button>
@@ -521,8 +490,8 @@ function UnlockedView({
             </button>
             {toast && <p className="copy-toast">{toast}</p>}
             <ul className="entry-list">
-                {filtered.map((entry) => (
-                    <li key={entry.uuid} className={`entry-row${matchedUuids.has(entry.uuid) ? ' matched' : ''}`}>
+                {matchedEntries.map((entry) => (
+                    <li key={entry.uuid} className="entry-row matched">
                         <EntryIcon entryUuid={entry.uuid} icon={entry.icon} hasCustomIcon={entry.hasCustomIcon} size={18} />
                         <div className="entry-info">
                             <div className="entry-title">{entry.title || '(no title)'}</div>
@@ -551,7 +520,7 @@ function UnlockedView({
                         </div>
                     </li>
                 ))}
-                {filtered.length === 0 && <li className="empty">No entries found.</li>}
+                {matchedEntries.length === 0 && <li className="empty">No entries match this page.</li>}
             </ul>
         </div>
     );

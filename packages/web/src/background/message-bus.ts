@@ -23,6 +23,8 @@ export type KeetarRequest =
     | { type: 'LOCK_VAULT' }
     | { type: 'GET_STATUS' }
     | { type: 'LIST_ENTRIES' }
+    // Password matching happens in the background — passwords never enter Popup's state (§8.2).
+    | { type: 'SEARCH_ENTRIES'; query: string }
     | { type: 'GET_ENTRY_FIELD'; entryUuid: string; field: EntryFieldName }
     | { type: 'GET_ENTRY_TOTP'; entryUuid: string }
     | { type: 'GET_PASSWORD_HEALTH' }
@@ -32,6 +34,7 @@ export type KeetarRequest =
     | { type: 'UPDATE_ENTRY'; entryUuid: string; fields: EntryFields }
     | { type: 'DELETE_ENTRY'; entryUuid: string }
     | { type: 'GET_GROUP_TREE' }
+    | { type: 'APPLY_AI_SORT'; assignments: { entryUuid: string; groupName: string }[] }
     | { type: 'GET_ENTRY_DETAIL'; entryUuid: string }
     | { type: 'MOVE_ENTRY'; entryUuid: string; toGroupUuid: string }
     | { type: 'CREATE_GROUP'; parentGroupUuid: string; name: string }
@@ -63,6 +66,7 @@ export type KeetarResponse =
     | { ok: true; type: 'LOCK_VAULT' }
     | { ok: true; type: 'GET_STATUS'; status: 'locked' | 'unlocked' }
     | { ok: true; type: 'LIST_ENTRIES'; entries: EntrySummary[] }
+    | { ok: true; type: 'SEARCH_ENTRIES'; entries: EntrySummary[] }
     | { ok: true; type: 'GET_ENTRY_FIELD'; value: string }
     | { ok: true; type: 'GET_ENTRY_TOTP'; code: string; remainingSeconds: number }
     | { ok: true; type: 'GET_PASSWORD_HEALTH'; report: PasswordHealthReport }
@@ -71,7 +75,8 @@ export type KeetarResponse =
     | { ok: true; type: 'CREATE_ENTRY'; entry: EntrySummary }
     | { ok: true; type: 'UPDATE_ENTRY' }
     | { ok: true; type: 'DELETE_ENTRY' }
-    | { ok: true; type: 'GET_GROUP_TREE'; root: GroupNode }
+    | { ok: true; type: 'GET_GROUP_TREE'; root: GroupNode; recycleBinGroupUuid: string | undefined }
+    | { ok: true; type: 'APPLY_AI_SORT'; groupsCreated: number; entriesMoved: number; skipped: number }
     | { ok: true; type: 'GET_ENTRY_DETAIL'; entry: EntryDetail }
     | { ok: true; type: 'MOVE_ENTRY' }
     | { ok: true; type: 'CREATE_GROUP'; group: GroupSummary }

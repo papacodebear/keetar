@@ -1,7 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ByteUtils, estimatePasswordEntropy } from '@keetar/core';
 import { sendToBackground } from '../../background/message-bus';
 import { EntryIcon } from '../shared/EntryIcon';
+import { buildAiSortExport, diffAiSortAssignments, parseAiSortResponse } from './ai-sort';
+import { connectGoogleDrive, getAccessToken, GoogleDriveProvider } from '../../providers/gdrive';
+import { showDrivePicker } from '../../providers/gdrive-picker';
+import type { AiSortDiff } from './ai-sort';
 import type {
     CombineConflict,
     CombineResolution,
@@ -12,10 +16,25 @@ import type {
 
 // Full vault management post-unlock: entries, groups, attachments (§8.1–8.2); shares background session with Popup.
 
+// Verify Google Drive token is live before offering picker (not just cached).
+async function ensureGoogleDriveAuthorized(): Promise<void> {
+    try {
+        await getAccessToken();
+    } catch {
+        await connectGoogleDrive();
+    }
+}
+
 type AppState =
     | { kind: 'loading' }
     | { kind: 'locked' }
-    | { kind: 'ready'; root: GroupNode; selectedGroupUuid: string; selectedEntryUuid?: string };
+    | {
+          kind: 'ready';
+          root: GroupNode;
+          recycleBinGroupUuid: string | undefined;
+          selectedGroupUuid: string;
+          selectedEntryUuid?: string;
+      };
 
 export function App() {
     const [state, setState] = useState<AppState>({ kind: 'loading' });
@@ -42,6 +61,7 @@ export function App() {
         setState({
             kind: 'ready',
             root: response.root,
+            recycleBinGroupUuid: response.recycleBinGroupUuid,
             selectedGroupUuid: keepSelection?.groupUuid ?? response.root.uuid,
             selectedEntryUuid: keepSelection?.entryUuid
         });
@@ -62,6 +82,7 @@ export function App() {
     return (
         <Ready
             root={state.root}
+            recycleBinGroupUuid={state.recycleBinGroupUuid}
             selectedGroupUuid={state.selectedGroupUuid}
             selectedEntryUuid={state.selectedEntryUuid}
             onReload={reloadTree}
@@ -71,11 +92,13 @@ export function App() {
 
 function Ready({
     root,
+    recycleBinGroupUuid,
     selectedGroupUuid,
     selectedEntryUuid,
     onReload
 }: {
     root: GroupNode;
+    recycleBinGroupUuid: string | undefined;
     selectedGroupUuid: string;
     selectedEntryUuid: string | undefined;
     onReload: (keepSelection?: { groupUuid: string; entryUuid?: string }) => Promise<void>;
@@ -86,6 +109,7 @@ function Ready({
     const [checkingHealth, setCheckingHealth] = useState(false);
     const [showImportExport, setShowImportExport] = useState(false);
     const [showCombine, setShowCombine] = useState(false);
+    const [showAiSort, setShowAiSort] = useState(false);
     const [fetchingFavicons, setFetchingFavicons] = useState(false);
     const [faviconStatus, setFaviconStatus] = useState<string | undefined>(undefined);
 
@@ -98,6 +122,7 @@ function Ready({
         setHealthError(undefined);
         setShowImportExport(false);
         setShowCombine(false);
+        setShowAiSort(false);
         void onReload({ groupUuid: selectedGroupUuid, entryUuid });
     }
 
@@ -105,13 +130,23 @@ function Ready({
         setHealthReport(undefined);
         setHealthError(undefined);
         setShowCombine(false);
+        setShowAiSort(false);
         setShowImportExport((shown) => !shown);
+    }
+
+    function toggleAiSort(): void {
+        setHealthReport(undefined);
+        setHealthError(undefined);
+        setShowImportExport(false);
+        setShowCombine(false);
+        setShowAiSort((shown) => !shown);
     }
 
     function toggleCombine(): void {
         setHealthReport(undefined);
         setHealthError(undefined);
         setShowImportExport(false);
+        setShowAiSort(false);
         setShowCombine((shown) => !shown);
     }
 
@@ -197,17 +232,52 @@ function Ready({
             <div className="tree-pane">
                 <div className="tree-pane-header">
                     <strong>Groups</strong>
-                    <button type="button" onClick={() => void loadPasswordHealth()} disabled={checkingHealth}>
-                        {checkingHealth ? 'Checking' : 'Health'}
+                    <button
+                        type="button"
+                        className="icon-button"
+                        title={checkingHealth ? 'Checking password health…' : 'Password health'}
+                        aria-label="Password health"
+                        onClick={() => void loadPasswordHealth()}
+                        disabled={checkingHealth}
+                    >
+                        {checkingHealth ? '⏳' : '🩺'}
                     </button>
-                    <button type="button" onClick={toggleImportExport}>
-                        Import/Export
+                    <button
+                        type="button"
+                        className="icon-button"
+                        title="Import / Export"
+                        aria-label="Import / Export"
+                        onClick={toggleImportExport}
+                    >
+                        ⇅
                     </button>
-                    <button type="button" onClick={toggleCombine}>
-                        Combine Vaults
+                    <button
+                        type="button"
+                        className="icon-button"
+                        title="Combine Vaults"
+                        aria-label="Combine Vaults"
+                        onClick={toggleCombine}
+                    >
+                        🔀
                     </button>
-                    <button type="button" onClick={() => void fetchAllFavicons()} disabled={fetchingFavicons}>
-                        {fetchingFavicons ? 'Fetching…' : 'Fetch Favicons'}
+                    <button
+                        type="button"
+                        className="icon-button"
+                        title="Organize with AI"
+                        aria-label="Organize with AI"
+                        onClick={toggleAiSort}
+                    >
+                        ✨
+                    </button>
+                    <button
+                        type="button"
+                        className="icon-button"
+                        title={fetchingFavicons ? 'Fetching favicons…' : 'Fetch Favicons'}
+                        aria-label="Fetch Favicons"
+                        onClick={() => void fetchAllFavicons()}
+                        disabled={fetchingFavicons}
+                    >
+                        {fetchingFavicons ? '⏳' : '🌐'}
                     </button>
                 </div>
                 {faviconStatus && (
@@ -234,7 +304,7 @@ function Ready({
                     </button>
                 </div>
                 {selectedGroup.entries.length === 0 && <p className="empty-state">No entries in this group.</p>}
-                {selectedGroup.entries.map((entry) => (
+                {sortByName(selectedGroup.entries, (entry) => entry.title).map((entry) => (
                     <div
                         key={entry.uuid}
                         className={`entry-row${entry.uuid === selectedEntryUuid ? ' selected' : ''}`}
@@ -266,6 +336,13 @@ function Ready({
                         onCombined={() => void onReload({ groupUuid: selectedGroupUuid })}
                         onClose={() => setShowCombine(false)}
                     />
+                ) : showAiSort ? (
+                    <AiSortPanel
+                        root={root}
+                        recycleBinGroupUuid={recycleBinGroupUuid}
+                        onApplied={() => void onReload({ groupUuid: selectedGroupUuid })}
+                        onClose={() => setShowAiSort(false)}
+                    />
                 ) : healthReport ? (
                     <PasswordHealthPanel report={healthReport} onClose={() => setHealthReport(undefined)} />
                 ) : healthError ? (
@@ -291,6 +368,10 @@ function Ready({
     );
 }
 
+function titleFor(report: PasswordHealthReport, entryUuid: string): string {
+    return report.findings.find((f) => f.entryUuid === entryUuid)?.title || '(no title)';
+}
+
 function PasswordHealthPanel({ report, onClose }: { report: PasswordHealthReport; onClose: () => void }) {
     return (
         <div>
@@ -302,7 +383,7 @@ function PasswordHealthPanel({ report, onClose }: { report: PasswordHealthReport
             </div>
             <p>
                 {report.total} entries: {report.weak} weak, {report.reused} reused, {report.old} old, {report.breached}{' '}
-                breached.
+                breached, {report.similar} similar to another entry.
             </p>
             {report.findings.length === 0 ? (
                 <p className="empty-state">No password issues found.</p>
@@ -316,7 +397,11 @@ function PasswordHealthPanel({ report, onClose }: { report: PasswordHealthReport
                                     finding.weak && `weak (${finding.entropy.toFixed(1)} bits)`,
                                     finding.reused && 'reused',
                                     finding.old && 'old',
-                                    finding.breachCount > 0 && `breached (${finding.breachCount})`
+                                    finding.breachCount > 0 && `breached (${finding.breachCount})`,
+                                    finding.similarEntryUuids.length > 0 &&
+                                        `similar to ${finding.similarEntryUuids
+                                            .map((uuid) => titleFor(report, uuid))
+                                            .join(', ')}`
                                 ]
                                     .filter(Boolean)
                                     .join(', ')}
@@ -325,6 +410,145 @@ function PasswordHealthPanel({ report, onClose }: { report: PasswordHealthReport
                     ))}
                 </ul>
             )}
+        </div>
+    );
+}
+
+function AiSortPanel({
+    root,
+    recycleBinGroupUuid,
+    onApplied,
+    onClose
+}: {
+    root: GroupNode;
+    recycleBinGroupUuid: string | undefined;
+    onApplied: () => void;
+    onClose: () => void;
+}) {
+    const exportText = useMemo(() => buildAiSortExport(root, recycleBinGroupUuid), [root, recycleBinGroupUuid]);
+    const [pasted, setPasted] = useState('');
+    const [diff, setDiff] = useState<AiSortDiff | undefined>(undefined);
+    const [error, setError] = useState<string | undefined>(undefined);
+    const [status, setStatus] = useState<string | undefined>(undefined);
+    const [copied, setCopied] = useState(false);
+    const [applying, setApplying] = useState(false);
+
+    async function copyExport(): Promise<void> {
+        await navigator.clipboard.writeText(exportText);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+    }
+
+    function preview(): void {
+        setError(undefined);
+        setStatus(undefined);
+        try {
+            setDiff(diffAiSortAssignments(root, recycleBinGroupUuid, parseAiSortResponse(pasted)));
+        } catch (e) {
+            setDiff(undefined);
+            setError(e instanceof Error ? e.message : String(e));
+        }
+    }
+
+    async function apply(): Promise<void> {
+        if (!diff) {
+            return;
+        }
+        setApplying(true);
+        setError(undefined);
+        try {
+            const assignments = diff.groups.flatMap((g) =>
+                g.entries.map((e) => ({ entryUuid: e.entryUuid, groupName: g.groupName }))
+            );
+            const response = await sendToBackground({ type: 'APPLY_AI_SORT', assignments });
+            if (!response.ok || response.type !== 'APPLY_AI_SORT') {
+                setError(!response.ok ? response.error : 'Applying changes failed.');
+                return;
+            }
+            setStatus(
+                `Created ${response.groupsCreated} ${response.groupsCreated === 1 ? 'group' : 'groups'}, moved ` +
+                    `${response.entriesMoved} ${response.entriesMoved === 1 ? 'entry' : 'entries'}.`
+            );
+            setDiff(undefined);
+            setPasted('');
+            onApplied();
+        } finally {
+            setApplying(false);
+        }
+    }
+
+    const totalChanges = diff?.groups.reduce((sum, g) => sum + g.entries.length, 0) ?? 0;
+
+    return (
+        <div>
+            <div className="middle-pane-header">
+                <strong>Organize with AI</strong>
+                <button type="button" onClick={onClose}>
+                    Close
+                </button>
+            </div>
+            <p>
+                Copy this list into your own Claude or ChatGPT conversation, ask it to group your entries, then
+                paste its reply back below. Only titles, URLs, and current groups are included — never usernames or
+                passwords.
+            </p>
+            <div className="field">
+                <label>Export</label>
+                <textarea readOnly rows={6} value={exportText} onFocus={(e) => e.target.select()} />
+                <button type="button" onClick={() => void copyExport()}>
+                    {copied ? 'Copied!' : 'Copy to clipboard'}
+                </button>
+            </div>
+            <div className="field">
+                <label>Paste the AI's reply</label>
+                <textarea
+                    rows={6}
+                    value={pasted}
+                    onChange={(e) => setPasted(e.target.value)}
+                    placeholder='[{"id": "...", "group": "..."}]'
+                />
+                <button type="button" onClick={preview} disabled={!pasted.trim()}>
+                    Preview changes
+                </button>
+            </div>
+            {error && <p className="empty-state">{error}</p>}
+            {status && <p style={{ marginTop: '1rem' }}>{status}</p>}
+            {diff &&
+                (totalChanges === 0 ? (
+                    <p className="empty-state">
+                        No changes to apply
+                        {diff.unknownCount > 0 &&
+                            ` — ${diff.unknownCount} unrecognized ${diff.unknownCount === 1 ? 'id' : 'ids'}`}
+                        {diff.unchangedCount > 0 && ` — ${diff.unchangedCount} already in that group`}.
+                    </p>
+                ) : (
+                    <div>
+                        {(diff.unknownCount > 0 || diff.unchangedCount > 0) && (
+                            <p className="entry-row-username">
+                                {diff.unknownCount > 0 &&
+                                    `${diff.unknownCount} unrecognized ${diff.unknownCount === 1 ? 'id' : 'ids'} skipped. `}
+                                {diff.unchangedCount > 0 &&
+                                    `${diff.unchangedCount} already in the right group.`}
+                            </p>
+                        )}
+                        <ul className="health-list">
+                            {diff.groups.map((g) => (
+                                <li key={g.groupName} className="health-row">
+                                    <div className="entry-row-title">
+                                        {g.groupName}
+                                        {g.isNew && ' (new)'}
+                                    </div>
+                                    <div className="entry-row-username">
+                                        {g.entries.map((e) => e.title || '(no title)').join(', ')}
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                        <button type="button" onClick={() => void apply()} disabled={applying}>
+                            {applying ? 'Applying…' : `Apply (${totalChanges} ${totalChanges === 1 ? 'entry' : 'entries'})`}
+                        </button>
+                    </div>
+                ))}
         </div>
     );
 }
@@ -467,7 +691,10 @@ function CombineVaultsPanel({
     onClose: () => void;
 }) {
     const [step, setStep] = useState<CombineStep>({ kind: 'pick' });
+    const [source, setSource] = useState<'local' | 'gdrive'>('local');
     const [pendingFile, setPendingFile] = useState<File | undefined>(undefined);
+    const [drivePick, setDrivePick] = useState<{ fileId: string; name: string } | undefined>(undefined);
+    const [drivePickBusy, setDrivePickBusy] = useState(false);
     const [password, setPassword] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | undefined>(undefined);
@@ -477,14 +704,36 @@ function CombineVaultsPanel({
         return () => void sendToBackground({ type: 'CLOSE_SECONDARY_VAULT' });
     }, []);
 
+    async function pickFromDrive(): Promise<void> {
+        setError(undefined);
+        setDrivePickBusy(true);
+        try {
+            await ensureGoogleDriveAuthorized();
+            const picked = await showDrivePicker();
+            if (picked) {
+                setDrivePick(picked);
+            }
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setDrivePickBusy(false);
+        }
+    }
+
     async function openSecondary(): Promise<void> {
-        if (!pendingFile || !password) {
+        if (source === 'local' ? !pendingFile : !drivePick) {
+            return;
+        }
+        if (!password) {
             return;
         }
         setBusy(true);
         setError(undefined);
         try {
-            const buffer = await pendingFile.arrayBuffer();
+            const buffer =
+                source === 'local'
+                    ? await pendingFile!.arrayBuffer()
+                    : await new GoogleDriveProvider().read(drivePick!.fileId);
             const dataBase64 = ByteUtils.bytesToBase64(new Uint8Array(buffer));
             const openResponse = await sendToBackground({ type: 'OPEN_SECONDARY_VAULT', dataBase64, password });
             if (!openResponse.ok || openResponse.type !== 'OPEN_SECONDARY_VAULT') {
@@ -559,16 +808,43 @@ function CombineVaultsPanel({
 
             {step.kind === 'pick' && (
                 <>
-                    <p>Open a second .kdbx file to fold its entries into "{selectedGroupName}".</p>
+                    <p>Open a second vault to fold its entries into "{selectedGroupName}".</p>
                     <div className="field">
-                        <label>Second vault file</label>
-                        <input type="file" accept=".kdbx" onChange={(e) => setPendingFile(e.target.files?.[0])} />
+                        <label>
+                            <input type="radio" checked={source === 'local'} onChange={() => setSource('local')} />{' '}
+                            This computer
+                        </label>{' '}
+                        <label>
+                            <input type="radio" checked={source === 'gdrive'} onChange={() => setSource('gdrive')} />{' '}
+                            Google Drive
+                        </label>
                     </div>
+                    {source === 'local' ? (
+                        <div className="field">
+                            <label>Second vault file</label>
+                            <input type="file" accept=".kdbx" onChange={(e) => setPendingFile(e.target.files?.[0])} />
+                        </div>
+                    ) : (
+                        <div className="field">
+                            <label>Second vault file</label>
+                            <button type="button" onClick={() => void pickFromDrive()} disabled={drivePickBusy}>
+                                {drivePickBusy
+                                    ? 'Opening picker…'
+                                    : drivePick
+                                      ? `Change ("${drivePick.name}" selected)`
+                                      : 'Choose from Google Drive'}
+                            </button>
+                        </div>
+                    )}
                     <div className="field">
                         <label>Its master password</label>
                         <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
                     </div>
-                    <button type="button" disabled={!pendingFile || !password || busy} onClick={() => void openSecondary()}>
+                    <button
+                        type="button"
+                        disabled={(source === 'local' ? !pendingFile : !drivePick) || !password || busy}
+                        onClick={() => void openSecondary()}
+                    >
                         {busy ? 'Opening…' : 'Open & Compare'}
                     </button>
                 </>
@@ -692,7 +968,7 @@ function GroupTreeNode({
             </div>
             {node.groups.length > 0 && (
                 <div className="tree-children">
-                    {node.groups.map((child) => (
+                    {sortByName(node.groups, (group) => group.name).map((child) => (
                         <GroupTreeNode
                             key={child.uuid}
                             node={child}
@@ -708,6 +984,11 @@ function GroupTreeNode({
             )}
         </div>
     );
+}
+
+// KDBX has no sort-order field — this is a display-only, case-insensitive sort.
+function sortByName<T>(items: T[], name: (item: T) => string): T[] {
+    return [...items].sort((a, b) => name(a).localeCompare(name(b), undefined, { sensitivity: 'base' }));
 }
 
 function flattenGroups(node: GroupNode): GroupNode[] {
@@ -870,7 +1151,7 @@ function EntryDetailPanel({
             <div className="field">
                 <label>Group</label>
                 <select value={entry.groupUuid} onChange={(e) => void moveTo(e.target.value)}>
-                    {flattenGroups(root).map((g) => (
+                    {sortByName(flattenGroups(root), (g) => g.name).map((g) => (
                         <option key={g.uuid} value={g.uuid}>
                             {g.name || '(unnamed)'}
                         </option>

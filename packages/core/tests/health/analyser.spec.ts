@@ -37,19 +37,39 @@ describe('password health analysis', () => {
 
         expect(report).toEqual({
             findings: [
-                { entryUuid: 'weak', title: 'Weak password', entropy: expect.any(Number), weak: true, reused: false, old: true, breachCount: 0 },
-                { entryUuid: 'reused-a', title: 'Reused A', entropy: expect.any(Number), weak: expect.any(Boolean), reused: true, old: false, breachCount: 0 },
-                { entryUuid: 'reused-b', title: 'Reused B', entropy: expect.any(Number), weak: expect.any(Boolean), reused: true, old: false, breachCount: 0 },
-                { entryUuid: 'breached', title: 'Breached password', entropy: expect.any(Number), weak: expect.any(Boolean), reused: false, old: false, breachCount: 42 }
+                { entryUuid: 'weak', title: 'Weak password', entropy: expect.any(Number), weak: true, reused: false, old: true, breachCount: 0, similarEntryUuids: [] },
+                { entryUuid: 'reused-a', title: 'Reused A', entropy: expect.any(Number), weak: expect.any(Boolean), reused: true, old: false, breachCount: 0, similarEntryUuids: [] },
+                { entryUuid: 'reused-b', title: 'Reused B', entropy: expect.any(Number), weak: expect.any(Boolean), reused: true, old: false, breachCount: 0, similarEntryUuids: [] },
+                { entryUuid: 'breached', title: 'Breached password', entropy: expect.any(Number), weak: expect.any(Boolean), reused: false, old: false, breachCount: 42, similarEntryUuids: [] }
             ],
             total: 4,
             weak: 4,
             reused: 2,
             old: 1,
-            breached: 1
+            breached: 1,
+            similar: 0
         });
         expect(checkPasswordBreach).toHaveBeenCalledTimes(3);
         expect(JSON.stringify(report)).not.toContain('CompromisedPass1!');
+    });
+
+    test('flags near-duplicate passwords as similar, but not passwords that just happen to be the same length', async () => {
+        const report = await analysePasswordHealth(
+            [
+                { uuid: 'base', title: 'Base', password: 'Tr0ubador&3-Sparrow' },
+                { uuid: 'near', title: 'Near', password: 'Tr0ubador&3-Sparrows' },
+                { uuid: 'unrelated', title: 'Unrelated', password: 'completely-different-19' }
+            ],
+            async () => 0
+        );
+
+        const near = report.findings.find((f) => f.entryUuid === 'near');
+        const base = report.findings.find((f) => f.entryUuid === 'base');
+        const unrelated = report.findings.find((f) => f.entryUuid === 'unrelated');
+        expect(base?.similarEntryUuids).toEqual(['near']);
+        expect(near?.similarEntryUuids).toEqual(['base']);
+        expect(unrelated?.similarEntryUuids).toEqual([]);
+        expect(report.similar).toBe(2);
     });
 
     test('uses zxcvbn entropy with KeePassXC\'s 256-character extrapolation rule', async () => {

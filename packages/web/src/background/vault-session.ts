@@ -191,6 +191,29 @@ class VaultSession {
         return results;
     }
 
+    // Password matching happens here, in the background — passwords never leave for this (§8.2).
+    searchEntries(query: string): EntrySummary[] {
+        const db = this.requireUnlocked();
+        const recycleBinUuid = db.meta.recycleBinUuid;
+        const term = query.toLowerCase();
+        const results: EntrySummary[] = [];
+        const walk = (group: KdbxGroup) => {
+            if (recycleBinUuid && group.uuid.equals(recycleBinUuid)) {
+                return;
+            }
+            for (const entry of group.entries) {
+                if (entryMatchesSearch(entry, term)) {
+                    results.push(summarizeEntry(entry));
+                }
+            }
+            for (const subGroup of group.groups) {
+                walk(subGroup);
+            }
+        };
+        walk(db.getDefaultGroup());
+        return results;
+    }
+
     getEntryField(entryUuid: string, field: EntryFieldName): string {
         const entry = this.requireEntry(entryUuid);
         const fieldName = field === 'username' ? 'UserName' : 'Password';
@@ -221,9 +244,9 @@ class VaultSession {
     }
 
     // Full vault tree for Manager (§8.2), including recycle bin.
-    getGroupTree(): GroupNode {
+    getGroupTree(): { root: GroupNode; recycleBinGroupUuid: string | undefined } {
         const db = this.requireUnlocked();
-        return toGroupNode(db.getDefaultGroup());
+        return { root: toGroupNode(db.getDefaultGroup()), recycleBinGroupUuid: db.meta.recycleBinUuid?.id };
     }
 
     getEntryDetail(entryUuid: string): EntryDetail {
@@ -302,6 +325,54 @@ class VaultSession {
         const group = db.createGroup(parent, name);
         await this.persist();
         return { uuid: group.uuid.id, name: group.name ?? '' };
+    }
+
+    // AI-sort apply: one persist for the whole batch, not one per move (§8.2 — Drive vaults re-upload on every persist).
+    async applyAiSort(assignments: { entryUuid: string; groupName: string }[]): Promise<{
+        groupsCreated: number;
+        entriesMoved: number;
+        skipped: number;
+    }> {
+        const db = this.requireUnlocked();
+        const recycleBinUuid = db.meta.recycleBinUuid;
+        const root = db.getDefaultGroup();
+        const groupsByName = new Map<string, KdbxGroup>();
+        const collect = (group: KdbxGroup) => {
+            if (recycleBinUuid && group.uuid.equals(recycleBinUuid)) {
+                return;
+            }
+            groupsByName.set((group.name ?? '').toLowerCase(), group);
+            for (const subGroup of group.groups) {
+                collect(subGroup);
+            }
+        };
+        collect(root);
+
+        let groupsCreated = 0;
+        let entriesMoved = 0;
+        let skipped = 0;
+        for (const { entryUuid, groupName } of assignments) {
+            const entry = findEntry(root, entryUuid);
+            if (!entry) {
+                skipped++;
+                continue;
+            }
+            const key = groupName.toLowerCase();
+            let targetGroup = groupsByName.get(key);
+            if (!targetGroup) {
+                targetGroup = db.createGroup(root, groupName);
+                groupsByName.set(key, targetGroup);
+                groupsCreated++;
+            }
+            if (entry.parentGroup?.uuid.equals(targetGroup.uuid)) {
+                skipped++;
+                continue;
+            }
+            db.move(entry, targetGroup);
+            entriesMoved++;
+        }
+        await this.persist();
+        return { groupsCreated, entriesMoved, skipped };
     }
 
     async renameGroup(groupUuid: string, name: string): Promise<void> {
@@ -735,6 +806,19 @@ function entryUrls(entry: KdbxEntry): string[] {
         }
     }
     return urls;
+}
+
+function entryMatchesSearch(entry: KdbxEntry, lowerCaseTerm: string): boolean {
+    if (fieldText(entry.fields.get('Title')).toLowerCase().includes(lowerCaseTerm)) {
+        return true;
+    }
+    if (fieldText(entry.fields.get('UserName')).toLowerCase().includes(lowerCaseTerm)) {
+        return true;
+    }
+    if (entryUrls(entry).some((url) => url.toLowerCase().includes(lowerCaseTerm))) {
+        return true;
+    }
+    return fieldText(entry.fields.get('Password')).toLowerCase().includes(lowerCaseTerm);
 }
 
 function summarizeEntry(entry: KdbxEntry): EntrySummary {

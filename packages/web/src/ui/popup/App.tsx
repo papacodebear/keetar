@@ -197,13 +197,18 @@ export function App() {
 }
 
 function GearButton() {
+    function openOptions(): void {
+        chrome.runtime.openOptionsPage();
+        window.close();
+    }
+
     return (
         <button
             type="button"
             className="gear-button"
             title="Preferences"
             aria-label="Preferences"
-            onClick={() => void chrome.runtime.openOptionsPage()}
+            onClick={openOptions}
         >
             ⚙
         </button>
@@ -513,24 +518,35 @@ function UnlockedView({
     onDisconnect: () => Promise<void>;
 }) {
     const [search, setSearch] = useState('');
+    const [searchResults, setSearchResults] = useState<EntrySummary[] | undefined>(undefined);
     const [toast, setToast] = useState('');
 
+    // Password matching runs in the background, not here — passwords never enter this state (§8.2).
+    useEffect(() => {
+        const term = search.trim();
+        if (!term) {
+            setSearchResults(undefined);
+            return;
+        }
+        const handle = setTimeout(() => {
+            void sendToBackground({ type: 'SEARCH_ENTRIES', query: term }).then((response) => {
+                if (response.ok && response.type === 'SEARCH_ENTRIES') {
+                    setSearchResults(response.entries);
+                }
+            });
+        }, 150);
+        return () => clearTimeout(handle);
+    }, [search]);
+
     const filtered = useMemo(() => {
-        const term = search.trim().toLowerCase();
-        const list = term
-            ? entries.filter(
-                  (entry) =>
-                      entry.title.toLowerCase().includes(term) ||
-                      entry.username.toLowerCase().includes(term)
-              )
-            : entries;
+        const list = searchResults ?? entries;
         // Sort page matches first; search still works over all entries (§5.4).
         return [...list].sort((a, b) => {
             const aMatch = matchedUuids.has(a.uuid) ? 0 : 1;
             const bMatch = matchedUuids.has(b.uuid) ? 0 : 1;
             return aMatch - bMatch;
         });
-    }, [entries, search, matchedUuids]);
+    }, [entries, searchResults, matchedUuids]);
 
     function showToast(message: string): void {
         setToast(message);
@@ -575,6 +591,7 @@ function UnlockedView({
     // Manager owns editing; Popup only launches it (§8.1–8.2).
     function openManager(): void {
         void chrome.tabs.create({ url: chrome.runtime.getURL('manager/manager.html') });
+        window.close();
     }
 
     return (
@@ -590,6 +607,7 @@ function UnlockedView({
                     type="text"
                     autoFocus
                     placeholder="Search"
+                    title="Searches title, username, URL, and password"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />

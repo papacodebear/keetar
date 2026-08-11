@@ -1,4 +1,5 @@
 import { gunzipSync } from 'fflate';
+import { DOMParser as XmldomDOMParser, XMLSerializer as XmldomXMLSerializer } from '@xmldom/xmldom';
 import { KdbxError } from '../errors/kdbx-error.js';
 import { ErrorCodes } from '../defs/consts.js';
 import * as XmlNames from '../defs/xml-names.js';
@@ -20,15 +21,12 @@ declare global {
     }
 }
 
+// No native DOMParser: Node.js/Bun tests, and also Chrome MV3's service worker, which has no DOM access at all.
 function createDOMParser(): DOMParser {
     if (typeof globalThis.DOMParser !== 'undefined') {
         return new globalThis.DOMParser();
     }
-
-    // Node.js / Bun environment: use @xmldom/xmldom
-    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-    const xmldom = require('@xmldom/xmldom') as { DOMParser: new (opts?: unknown) => DOMParser };
-    return new xmldom.DOMParser({
+    return new XmldomDOMParser({
         errorHandler: {
             warning: (e: Error) => {
                 throw e;
@@ -40,18 +38,14 @@ function createDOMParser(): DOMParser {
                 throw e;
             }
         }
-    });
+    }) as unknown as DOMParser;
 }
 
 function createXMLSerializer(): XMLSerializer {
     if (typeof globalThis.XMLSerializer !== 'undefined') {
         return new globalThis.XMLSerializer();
     }
-
-    // Node.js / Bun environment: use @xmldom/xmldom
-    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-    const xmldom = require('@xmldom/xmldom') as { XMLSerializer: new () => XMLSerializer };
-    return new xmldom.XMLSerializer();
+    return new XmldomXMLSerializer() as unknown as XMLSerializer;
 }
 
 export function parse(xml: string): Document {

@@ -111,18 +111,20 @@ function DatabaseSection({
 }) {
     // Biometric enrollment hidden behind gear; other controls always visible.
     const [showBiometric, setShowBiometric] = useState(false);
-    const [showUnlockForm, setShowUnlockForm] = useState(false);
     const [pickBusy, setPickBusy] = useState(false);
     const [pickError, setPickError] = useState<string | undefined>(undefined);
     const lockState = useVaultLockState(vault.uuid);
     const sync = useVaultSyncStatus(vault, onChanged);
 
-    async function handleLockToggle(): Promise<void> {
+    // Form visibility follows lock status directly — no extra click to reveal it.
+    async function handleLockClick(): Promise<void> {
         if (lockState.status === 'unlocked') {
             await lockState.lock();
-            return;
         }
-        setShowUnlockForm((s) => !s);
+    }
+
+    function openManager(): void {
+        void chrome.tabs.create({ url: chrome.runtime.getURL('manager/manager.html') });
     }
 
     // Pick new backing file or recover missing Drive file (reconnect inline if needed).
@@ -170,13 +172,24 @@ function DatabaseSection({
                     </button>
                 </span>
                 {vault.provider === 'gdrive' && <SyncBadge status={sync.status} />}
+                {lockState.status === 'unlocked' && (
+                    <button
+                        type="button"
+                        className="manager-button"
+                        title="View all entries & groups"
+                        aria-label="View all entries & groups"
+                        onClick={openManager}
+                    >
+                        ☰
+                    </button>
+                )}
                 <button
                     type="button"
                     className="lock-button"
                     title={lockState.status === 'unlocked' ? 'Lock database' : 'Unlock database'}
                     aria-label={lockState.status === 'unlocked' ? 'Lock database' : 'Unlock database'}
                     disabled={lockState.status === 'checking'}
-                    onClick={() => void handleLockToggle()}
+                    onClick={() => void handleLockClick()}
                 >
                     {lockState.status === 'unlocked' ? '🔓' : '🔒'}
                 </button>
@@ -216,8 +229,8 @@ function DatabaseSection({
                     {sync.message && <p className="error">{sync.message}</p>}
                 </div>
             )}
-            {showUnlockForm && lockState.status === 'locked' && (
-                <UnlockForm vault={vault} enrolled={enrolled} lockState={lockState} onUnlocked={() => setShowUnlockForm(false)} />
+            {lockState.status === 'locked' && (
+                <UnlockForm vault={vault} enrolled={enrolled} lockState={lockState} onUnlocked={openManager} />
             )}
             {showBiometric && (
                 <>

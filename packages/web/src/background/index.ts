@@ -46,6 +46,8 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
             return { ok: true, type: 'GET_STATUS', status: vaultSession.status };
         case 'LIST_ENTRIES':
             return { ok: true, type: 'LIST_ENTRIES', entries: vaultSession.listEntries() };
+        case 'SEARCH_ENTRIES':
+            return { ok: true, type: 'SEARCH_ENTRIES', entries: vaultSession.searchEntries(request.query) };
         case 'GET_ENTRY_FIELD':
             return {
                 ok: true,
@@ -91,8 +93,14 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
         case 'DELETE_ENTRY':
             await vaultSession.deleteEntry(request.entryUuid);
             return { ok: true, type: 'DELETE_ENTRY' };
-        case 'GET_GROUP_TREE':
-            return { ok: true, type: 'GET_GROUP_TREE', root: vaultSession.getGroupTree() };
+        case 'GET_GROUP_TREE': {
+            const { root, recycleBinGroupUuid } = vaultSession.getGroupTree();
+            return { ok: true, type: 'GET_GROUP_TREE', root, recycleBinGroupUuid };
+        }
+        case 'APPLY_AI_SORT': {
+            const result = await vaultSession.applyAiSort(request.assignments);
+            return { ok: true, type: 'APPLY_AI_SORT', ...result };
+        }
         case 'GET_ENTRY_DETAIL':
             return {
                 ok: true,

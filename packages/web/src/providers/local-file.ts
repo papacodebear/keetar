@@ -39,10 +39,16 @@ async function storeFileHandle(uuid: string, handle: FileSystemFileHandle): Prom
 }
 
 async function getFileHandle(uuid: string): Promise<FileSystemFileHandle | undefined> {
-    const handle = await withStore<FileSystemFileHandle | undefined>('readonly', (store) =>
+    const handle = await withStore<unknown>('readonly', (store) =>
         store.get(uuid)
     );
-    return handle ?? undefined;
+    if (isFileSystemFileHandle(handle)) {
+        return handle;
+    }
+    if (handle !== undefined) {
+        await deleteFileHandle(uuid);
+    }
+    return undefined;
 }
 
 async function deleteFileHandle(uuid: string): Promise<void> {
@@ -125,7 +131,7 @@ export class LocalFileProvider implements FileProvider {
     private async getHandle(): Promise<FileSystemFileHandle> {
         const handle = await getFileHandle(this.uuid);
         if (!handle) {
-            throw new Error(`no file handle stored for vault ${this.uuid}`);
+            throw new Error('no usable file handle is stored for this vault; pick the database again in Options');
         }
         return handle;
     }
@@ -144,4 +150,15 @@ export class LocalFileProvider implements FileProvider {
             throw new Error('file permission was not granted');
         }
     }
+}
+
+function isFileSystemFileHandle(value: unknown): value is FileSystemFileHandle {
+    return (
+        typeof value === 'object' &&
+        value !== null &&
+        'getFile' in value &&
+        typeof value.getFile === 'function' &&
+        'createWritable' in value &&
+        typeof value.createWritable === 'function'
+    );
 }

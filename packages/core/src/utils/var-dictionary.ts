@@ -17,9 +17,7 @@ export enum ValueType {
     Bytes = 0x42
 }
 
-// The Bytes case's runtime handling (below, in set()) has always accepted a
-// Uint8Array and converted it via arrayToBuffer() — this type just never
-// declared that; TS 5.7+'s stricter typed-array checking surfaced the gap.
+// set() accepts Uint8Array; TS 5.7+ stricter typed-array checking surfaced the type gap.
 export type VarDictionaryAnyValue =
     | number
     | Int64

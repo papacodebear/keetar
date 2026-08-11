@@ -1,6 +1,4 @@
-// DOM heuristics for username/password field pairs (§5.2). Check in priority
-// order, stop at the first strategy that finds anything — a later, less
-// reliable strategy should never override an earlier, more reliable one.
+// DOM heuristics for login form detection; strategies ordered by reliability (§5.2).
 
 export interface DetectedLoginForm {
     usernameField?: HTMLInputElement;
@@ -14,11 +12,7 @@ const NAME_ID_USERNAME_PATTERN = /user|login|email/i;
 const LABEL_PASSWORD_PATTERN = /password/i;
 const LABEL_USERNAME_PATTERN = /username|e-?mail/i;
 
-/**
- * Detects a login form under `root`. Returns undefined if nothing was found.
- * A result with only `usernameField` set (no `passwordField`) is a valid,
- * intentional outcome — see the multi-step login flow note below.
- */
+// Detect form; username-only result valid for multi-step flows (§5.2).
 export function detectLoginForm(root: ParentNode = document): DetectedLoginForm | undefined {
     const strategies: Strategy[] = [
         byAutocomplete,
@@ -64,17 +58,7 @@ function byEmailAndPassword(root: ParentNode): DetectedLoginForm | undefined {
     return usernameField ? { usernameField, passwordField } : undefined;
 }
 
-// 3. input[type="text"] + input[type="password"] pair (check proximity in DOM)
-//
-// Requires an actual password field, unlike the other strategies — a lone
-// input[type="text"] is too weak a signal on its own (a search box would
-// match) to justify jumping to it ahead of the more specific name/id, label,
-// and placeholder strategies (4–6) that follow. Those, along with strategies
-// 1–2 above, already return a username-only result when no password field is
-// found (via `present()`), which is what actually satisfies the multi-step
-// login flow note (§5.2): a password field can legitimately be absent while
-// a username field is present, and content.ts pre-fills just the username
-// and waits rather than failing to detect the page at all.
+// Text + password proximity; text alone too weak (would match search box; §5.2).
 function byTextAndPasswordProximity(root: ParentNode): DetectedLoginForm | undefined {
     const passwordField = query(root, 'input[type="password"]');
     if (!passwordField) {

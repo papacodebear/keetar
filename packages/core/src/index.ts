@@ -27,6 +27,12 @@ import { KdbxUuid } from './kdbx/kdbx-uuid.js';
 
 import * as Totp from './totp/totp.js';
 
+import { parseBitwardenJson } from './import/bitwarden.js';
+import { exportToCsv, exportToXml } from './import/export.js';
+import { parseCsv } from './import/csv.js';
+import { parseOnePux } from './import/onepassword.js';
+import { parseProtonPassJson } from './import/protonpass.js';
+
 import { BinaryStream } from './utils/binary-stream.js';
 import * as ByteUtils from './utils/byte-utils.js';
 import { Int64 } from './utils/int64.js';
@@ -59,6 +65,12 @@ export {
     KdbxTimes,
     KdbxUuid,
     Totp,
+    parseBitwardenJson,
+    parseCsv,
+    parseOnePux,
+    parseProtonPassJson,
+    exportToCsv,
+    exportToXml,
     BinaryStream,
     ByteUtils,
     Int64,
@@ -103,3 +115,4 @@ export type {
     KdbxCustomIcon
 } from './kdbx/kdbx-meta.js';
 export type { FileProvider, FileMetadata, FileListing } from './providers/file-provider.js';
+export type { VaultEntryRecord } from './import/types.js';

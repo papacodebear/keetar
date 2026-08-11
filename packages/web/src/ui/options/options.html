@@ -21,6 +21,29 @@
       .error { color: #c00; }
       .success { color: #2a7a2a; }
       .hint { color: #666; font-size: 0.9em; }
+      .choice-buttons { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
+      .choice-buttons button { flex: 1; padding: 1rem; font-size: 14px; }
+      .panel-box { margin-top: 1rem; }
+      .vault-badge {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        margin-top: 1rem;
+        padding: 0.6rem 0.8rem;
+        border: 1px solid rgba(127, 127, 127, 0.3);
+        border-radius: 6px;
+      }
+      .vault-badge-text { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+      .vault-name-button { margin-right: 0; padding: 0; border: none; background: none; font: inherit; font-weight: 600; text-decoration: underline; }
+      .lock-button { padding: 0.3rem 0.5rem; font-size: 15px; line-height: 1; }
+      .gear-button { padding: 0.3rem 0.5rem; font-size: 15px; line-height: 1; }
+      .disconnect-button { margin-right: 0; padding: 0.3rem 0.5rem; font-size: 14px; line-height: 1; color: #c00; }
+      .sync-badge { font-size: 0.85em; cursor: default; }
+      .sync-ok-badge { color: #2a7a2a; }
+      .sync-pending-badge { color: #a06a00; }
+      .sync-conflict-badge { color: #c00; }
+      .sync-conflict { margin-top: 0.5rem; }
     </style>
   </head>
   <body>

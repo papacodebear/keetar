@@ -373,11 +373,11 @@ export class KdbxEntry {
         }
         const remoteHistory = remoteEntry.history.slice();
         if (this.lastModTime < remoteEntry.lastModTime) {
-            // remote is more new; push current state to history and update
+            // Remote is newer
             this.pushHistory();
             this.copyFrom(remoteEntry);
         } else if (this.lastModTime > remoteEntry.lastModTime) {
-            // local is more new; if remote state is not in history, push it
+            // Local is newer; add remote to history if not present
             const existsInHistory = this.history.some((historyEntry) => {
                 return historyEntry.lastModTime === remoteEntry.lastModTime;
             });
@@ -390,29 +390,7 @@ export class KdbxEntry {
         this.history = this.mergeHistory(remoteHistory, remoteEntry.lastModTime);
     }
 
-    /**
-     * Merge entry history with remote entry history
-     * Tombstones are stored locally and must be immediately discarded by replica after successful upstream push.
-     * It's client responsibility, to save and load tombstones for local replica, and to clear them after successful upstream push.
-     *
-     * Implements remove-win OR-set CRDT with local tombstones stored in _editState.
-     *
-     * Format doesn't allow saving tombstones for history entries, so they are stored locally.
-     * Any unmodified state from past or modifications of current state synced with central upstream will be successfully merged.
-     * Assumes there's only one central upstream, may produce inconsistencies while merging outdated replica outside main upstream.
-     * Phantom entries and phantom deletions will appear if remote replica checked out an old state and has just added a new state.
-     * If a client is using central upstream for sync, the remote replica must first sync it state and
-     * only after it update the upstream, so this should never happen.
-     *
-     * References:
-     *
-     * An Optimized Conflict-free Replicated Set arXiv:1210.3368 [cs.DC]
-     * http://arxiv.org/abs/1210.3368
-     *
-     * Gene T. J. Wuu and Arthur J. Bernstein. Efficient solutions to the replicated log and dictionary
-     * problems. In Symp. on Principles of Dist. Comp. (PODC), pages 233–242, Vancouver, BC, Canada, August 1984.
-     * https://pages.lip6.fr/Marc.Shapiro/papers/RR-7687.pdf
-     */
+    /** Merge histories using remove-win OR-set CRDT with local tombstones (arXiv:1210.3368) */
     private mergeHistory(remoteHistory: KdbxEntry[], remoteLastModTime: number) {
         // we can skip sorting but the history may not have been sorted
         this.history.sort((x, y) => x.lastModTime - y.lastModTime);

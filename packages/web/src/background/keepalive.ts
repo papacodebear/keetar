@@ -1,8 +1,6 @@
 import { alarms } from '../platform';
 
-// Chrome MV3 service worker keepalive (§3.4, §9.3). Handling any alarm event
-// prevents SW termination. No-op under the Firefox shim (persistent
-// background page — see platform/firefox.ts).
+// Chrome MV3 service worker keepalive; no-op on Firefox persistent background page.
 const KEEPALIVE_ALARM = 'keepalive';
 const KEEPALIVE_PERIOD_MINUTES = 0.4; // ~24s
 

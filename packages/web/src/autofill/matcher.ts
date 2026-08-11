@@ -1,9 +1,6 @@
 import { getDomain } from 'tldts';
 
-// Domain matching: exact → hostname → base domain → title (§5.4). Pure logic,
-// no @keetar/core dependency — takes plain data so it stays trivially
-// testable (§10.2) independent of any real decrypted vault.
-
+// Domain matching logic (pure, testable); tiers: exact → hostname → base domain → title.
 export type MatchTier = 1 | 2 | 3 | 4;
 
 export interface MatchableEntry {

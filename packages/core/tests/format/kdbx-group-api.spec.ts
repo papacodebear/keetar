@@ -1,15 +1,4 @@
-/**
- * KdbxGroup API tests.
- *
- * Comprehensive tests for group hierarchy operations:
- * - Create groups and sub-groups
- * - Nested group hierarchies
- * - Move groups between parents
- * - Delete groups (to recycle bin and permanently)
- * - Group properties (name, icon, notes, enableAutoType, enableSearching)
- * - allGroups(), allEntries(), allGroupsAndEntries() iterators
- * - Group round-trip through save/reload
- */
+// KdbxGroup API tests: creation, hierarchy, move/delete, properties, iterators
 
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import * as kdbxweb from '../../src';
@@ -39,10 +28,6 @@ describe('KdbxGroup API', () => {
             kdbxweb.ProtectedValue.fromString('test')
         );
     }
-
-    // ---------------------------------------------------------------
-    // Group creation
-    // ---------------------------------------------------------------
 
     describe('group creation', () => {
         test('database has a default group', () => {
@@ -84,7 +69,6 @@ describe('KdbxGroup API', () => {
             const g2 = db.createGroup(root, 'Group B');
             const g3 = db.createGroup(root, 'Group C');
 
-            // Root has recycle bin + 3 new groups
             const nonRecycleBin = root.groups.filter(
                 (g) => g.name !== kdbxweb.Consts.Defaults.RecycleBinName
             );
@@ -109,10 +93,6 @@ describe('KdbxGroup API', () => {
             expect(group.icon).toBe(kdbxweb.Consts.Icons.Folder);
         });
     });
-
-    // ---------------------------------------------------------------
-    // Group properties
-    // ---------------------------------------------------------------
 
     describe('group properties', () => {
         test('sets and gets name', () => {
@@ -166,7 +146,6 @@ describe('KdbxGroup API', () => {
             group.enableSearching = false;
             group.expanded = false;
 
-            // Add an entry so the group is not empty
             const entry = db.createEntry(group);
             entry.fields.set('Title', 'In Group');
             entry.fields.set('Password', kdbxweb.ProtectedValue.fromString('p'));
@@ -174,7 +153,6 @@ describe('KdbxGroup API', () => {
             const saved = await db.save();
             const db2 = await kdbxweb.Kdbx.load(saved, createCred());
 
-            // Find the group (skip recycle bin)
             const reloadedGroup = db2
                 .getDefaultGroup()
                 .groups.find((g) => g.name === 'PropsGroup');
@@ -187,10 +165,6 @@ describe('KdbxGroup API', () => {
             expect(reloadedGroup!.entries.length).toBe(1);
         }, 30000);
     });
-
-    // ---------------------------------------------------------------
-    // Group hierarchy traversal
-    // ---------------------------------------------------------------
 
     describe('hierarchy traversal', () => {
         test('allGroups() yields all descendant groups', () => {
@@ -240,7 +214,6 @@ describe('KdbxGroup API', () => {
 
             const all = [...root.allGroupsAndEntries()];
 
-            // Should include root, recycle bin, sub group, and 2 entries
             const groups = all.filter((x) => x instanceof kdbxweb.KdbxGroup);
             const entries = all.filter((x) => x instanceof kdbxweb.KdbxEntry);
 
@@ -248,10 +221,6 @@ describe('KdbxGroup API', () => {
             expect(entries.length).toBe(2);
         });
     });
-
-    // ---------------------------------------------------------------
-    // Move operations
-    // ---------------------------------------------------------------
 
     describe('move operations', () => {
         test('moves entry between groups', () => {
@@ -316,10 +285,6 @@ describe('KdbxGroup API', () => {
         });
     });
 
-    // ---------------------------------------------------------------
-    // Delete operations
-    // ---------------------------------------------------------------
-
     describe('delete operations', () => {
         test('remove() moves entry to recycle bin when enabled', () => {
             const db = createDb();
@@ -331,7 +296,6 @@ describe('KdbxGroup API', () => {
 
             expect(root.entries).not.toContain(entry);
 
-            // Check recycle bin
             const recycleBin = db.getGroup(db.meta.recycleBinUuid!);
             expect(recycleBin).toBeTruthy();
             expect(recycleBin!.entries).toContain(entry);
@@ -366,16 +330,11 @@ describe('KdbxGroup API', () => {
             db.remove(entry);
 
             expect(root.entries).not.toContain(entry);
-            // Should have added a deleted object record
             expect(
                 db.deletedObjects.some((d) => d.uuid?.id === entryUuid)
             ).toBe(true);
         });
     });
-
-    // ---------------------------------------------------------------
-    // getGroup
-    // ---------------------------------------------------------------
 
     describe('getGroup', () => {
         test('finds group by UUID', () => {
@@ -406,10 +365,6 @@ describe('KdbxGroup API', () => {
         });
     });
 
-    // ---------------------------------------------------------------
-    // Recycle bin
-    // ---------------------------------------------------------------
-
     describe('recycle bin', () => {
         test('creates recycle bin automatically', () => {
             const db = createDb();
@@ -435,16 +390,11 @@ describe('KdbxGroup API', () => {
         });
     });
 
-    // ---------------------------------------------------------------
-    // Group hierarchy save/reload
-    // ---------------------------------------------------------------
-
     describe('hierarchy save/reload', () => {
         test('complex hierarchy survives round-trip', async () => {
             const db = createDb('HierarchyTest');
             const root = db.getDefaultGroup();
 
-            // Build: root -> (A -> (A1, A2), B -> (B1 -> (B1a)))
             const a = db.createGroup(root, 'A');
             db.createGroup(a, 'A1');
             db.createGroup(a, 'A2');
@@ -453,7 +403,6 @@ describe('KdbxGroup API', () => {
             const b1 = db.createGroup(b, 'B1');
             db.createGroup(b1, 'B1a');
 
-            // Add entries at various levels
             const re = db.createEntry(root);
             re.fields.set('Title', 'Root Entry');
             re.fields.set('Password', kdbxweb.ProtectedValue.fromString('p'));
@@ -470,7 +419,6 @@ describe('KdbxGroup API', () => {
             const db2 = await kdbxweb.Kdbx.load(saved, createCred());
             const root2 = db2.getDefaultGroup();
 
-            // Verify structure
             const allNames = [...root2.allGroups()].map((g) => g.name);
             expect(allNames).toContain('A');
             expect(allNames).toContain('A1');
@@ -479,7 +427,6 @@ describe('KdbxGroup API', () => {
             expect(allNames).toContain('B1');
             expect(allNames).toContain('B1a');
 
-            // Verify entries
             const allEntryTitles = [...root2.allEntries()].map((e) =>
                 e.fields.get('Title')
             );
@@ -488,10 +435,6 @@ describe('KdbxGroup API', () => {
             expect(allEntryTitles).toContain('B1a Entry');
         }, 30000);
     });
-
-    // ---------------------------------------------------------------
-    // Group copyFrom
-    // ---------------------------------------------------------------
 
     describe('copyFrom', () => {
         test('copies group properties', () => {
@@ -511,10 +454,6 @@ describe('KdbxGroup API', () => {
             expect(copy.uuid.id).toBe(original.uuid.id);
         });
     });
-
-    // ---------------------------------------------------------------
-    // Group tags (KDBX 4.1)
-    // ---------------------------------------------------------------
 
     describe('group tags (KDBX 4.1)', () => {
         test('sets and gets group tags', () => {

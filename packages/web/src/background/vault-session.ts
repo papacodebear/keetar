@@ -1,27 +1,41 @@
 import {
     analysePasswordHealth,
     ByteUtils,
+    Consts,
     createHibpClient,
+    exportToCsv,
+    exportToXml,
     Kdbx,
     KdbxCredentials,
     KdbxBinaries,
+    KdbxUuid,
     ProtectedValue,
     Totp
 } from '@keetar/core';
 import type {
+    FileProvider,
     KdbxBinary,
     KdbxBinaryWithHash,
     KdbxEntry,
     KdbxEntryField,
     KdbxGroup,
     KdbxMemoryProtection,
-    PasswordHealthReport
+    PasswordHealthReport,
+    VaultEntryRecord
 } from '@keetar/core';
-import { LocalFileProvider } from '../providers/local-file';
+import { getConfiguredVault } from '../config/vault-config';
+import { createFileProvider } from '../providers';
+import { fetchFaviconPng } from './favicon';
+import {
+    findDuplicateGroups,
+    findNonConflicting,
+    mergeIcon,
+    mergeStringField,
+    partitionByPasswordMatch
+} from './dedup';
+import type { DedupGroup, IdentifiedRecord } from './dedup';
 
-// In-memory decrypted vault state + lock logic (§3.4). Lives only in service
-// worker module-level memory — lost on lock, lost on SW termination (both
-// correct and expected per §3.4).
+// In-memory decrypted vault state, lost on lock or SW termination (§3.4).
 
 export interface VaultSummary {
     rootGroupName: string;
@@ -36,6 +50,10 @@ export interface EntrySummary {
     /** Primary URL plus any KP2A_URL_* custom strings (§5.4) — fed straight into autofill/matcher.ts. */
     urls: string[];
     hasTotp: boolean;
+    /** KeePass's built-in icon index (0-68, Consts.Icons) — a static asset lookup, not fetched. */
+    icon: number;
+    /** True when a custom icon image is set; fetched separately (getEntryCustomIconBase64) since it's binary. */
+    hasCustomIcon: boolean;
 }
 
 export type EntryFieldName = 'username' | 'password';
@@ -62,6 +80,8 @@ export interface EntryDetail {
     url: string;
     notes: string;
     attachments: AttachmentSummary[];
+    icon: number;
+    hasCustomIcon: boolean;
 }
 
 export interface GroupNode {
@@ -78,6 +98,21 @@ export interface GroupSummary {
 
 export type { PasswordHealthReport };
 
+export interface CombineConflictEntry {
+    uuid: string;
+    title: string;
+    username: string;
+    url: string;
+}
+
+export interface CombineConflict {
+    key: string;
+    primary: CombineConflictEntry[];
+    secondary: CombineConflictEntry[];
+}
+
+export type CombineResolution = 'keep-a' | 'keep-b' | 'keep-both';
+
 const FIELD_MAP: Record<keyof EntryFields, { kdbxName: string; protectionKey: keyof KdbxMemoryProtection }> = {
     title: { kdbxName: 'Title', protectionKey: 'title' },
     username: { kdbxName: 'UserName', protectionKey: 'userName' },
@@ -88,13 +123,18 @@ const FIELD_MAP: Record<keyof EntryFields, { kdbxName: string; protectionKey: ke
 
 type VaultSessionState =
     | { status: 'locked' }
-    | { status: 'unlocked'; uuid: string; db: Kdbx };
+    | { status: 'unlocked'; uuid: string; db: Kdbx; provider: FileProvider; path: string };
 
 const MAX_SUMMARY_TITLES = 20;
+const FAVICON_FETCH_CONCURRENCY = 10;
 
 class VaultSession {
     private state: VaultSessionState = { status: 'locked' };
     private readonly hibpClient = createHibpClient();
+    private secondaryDb: Kdbx | undefined;
+    private pendingCombine:
+        | { identicalGroups: DedupGroup[]; divergentGroups: DedupGroup[]; nonConflicting: IdentifiedRecord[] }
+        | undefined;
 
     get status(): VaultSessionState['status'] {
         return this.state.status;
@@ -105,13 +145,7 @@ class VaultSession {
         return this.unlockWithCredentials(uuid, credentials);
     }
 
-    // Biometric unlock (§6.2): Popup already did the WebAuthn ceremony and
-    // unwrapped the stored password hash itself — this just finishes the
-    // job with it. `KdbxCredentials(null)` skips hashing a (nonexistent)
-    // live password, then `.passwordHash` — a public field `getHash()`
-    // reads directly, never re-deriving from a password string — is set by
-    // hand. Everything past that point is Kdbx.load()'s completely
-    // unmodified normal path; the Argon2 KDF still runs in full.
+    // Biometric unlock (§6.2): finish WebAuthn by directly setting the pre-unwrapped password hash.
     async unlockWithHash(uuid: string, passwordHash: ArrayBuffer): Promise<VaultSummary> {
         const credentials = new KdbxCredentials(null);
         await credentials.ready;
@@ -120,29 +154,24 @@ class VaultSession {
     }
 
     private async unlockWithCredentials(uuid: string, credentials: KdbxCredentials): Promise<VaultSummary> {
-        const provider = new LocalFileProvider(uuid);
-        const data = await provider.read('');
+        const configured = await getConfiguredVault();
+        if (!configured || configured.uuid !== uuid) {
+            throw new Error('vault is not configured');
+        }
+        const provider = createFileProvider(configured);
+        const path = configured.path ?? '';
+        const data = await provider.read(path);
         const db = await Kdbx.load(data, credentials);
-        this.state = { status: 'unlocked', uuid, db };
+        this.state = { status: 'unlocked', uuid, db, provider, path };
         return summarize(db);
     }
 
-    // On lock: overwrite the key buffer with zeros, then drop the reference
-    // (§3.4). The composite/derived key itself is zeroed internally by
-    // @keetar/core as soon as it's consumed (kdbx-format.ts's decrypt
-    // pipeline), so there's no separate key buffer for this session to zero
-    // here — dropping the Kdbx reference (which holds the decrypted tree,
-    // itself made of ProtectedValue-wrapped fields per §11.1) is what's left
-    // to do at this layer.
+    // On lock: drop the Kdbx reference to zero the decrypted tree (§3.4).
     lock(): void {
         this.state = { status: 'locked' };
     }
 
-    // Lightweight list for Popup's entry list (§8.2 — "credential
-    // search/selection"). Title + username only, never the password: Popup
-    // fetches an individual field on demand (getEntryField) only at the
-    // moment the user actually copies it, rather than holding every entry's
-    // full field set in the popup's own memory/DOM at once.
+    // Lightweight list for Popup (§8.2): title+username only, password fetched on-demand per field.
     listEntries(): EntrySummary[] {
         const db = this.requireUnlocked();
         const recycleBinUuid = db.meta.recycleBinUuid;
@@ -191,9 +220,7 @@ class VaultSession {
         return analysePasswordHealth(entries, (password) => this.hibpClient.checkPassword(password));
     }
 
-    // Full vault-content tree for Manager (§8.2 — "group tree management").
-    // Recycle bin included here (unlike listEntries(), used by Popup/autofill
-    // matching) — Manager is where the user actually manages it.
+    // Full vault tree for Manager (§8.2), including recycle bin.
     getGroupTree(): GroupNode {
         const db = this.requireUnlocked();
         return toGroupNode(db.getDefaultGroup());
@@ -215,13 +242,27 @@ class VaultSession {
             attachments: Array.from(entry.binaries.entries()).map(([name, value]) => ({
                 name,
                 size: resolveBinary(value).byteLength
-            }))
+            })),
+            icon: entry.icon ?? Consts.Icons.Key,
+            hasCustomIcon: entry.customIcon !== undefined
         };
     }
 
-    // Write path (§3.3, §14). Auto-saves on every mutation rather than
-    // requiring an explicit save action — see §14's "Auto-save behaviour"
-    // for the reasoning.
+    // Fetch custom icon on demand (binary data not in list responses).
+    getEntryCustomIconBase64(entryUuid: string): string {
+        const db = this.requireUnlocked();
+        const entry = this.requireEntry(entryUuid);
+        if (!entry.customIcon) {
+            throw new Error('entry has no custom icon');
+        }
+        const customIcon = db.meta.customIcons.get(entry.customIcon.id);
+        if (!customIcon) {
+            throw new Error('custom icon data not found');
+        }
+        return ByteUtils.bytesToBase64(customIcon.data);
+    }
+
+    // Write path (§3.3, §14): auto-saves on every mutation.
     async createEntry(groupUuid: string, fields: EntryFields): Promise<EntrySummary> {
         const db = this.requireUnlocked();
         const group = this.requireGroup(groupUuid);
@@ -280,10 +321,202 @@ class VaultSession {
         await this.persist();
     }
 
-    // dataBase64 rather than ArrayBuffer: chrome.runtime.sendMessage's
-    // documented contract is a JSON-ifiable payload, and ArrayBuffer isn't
-    // one (it would serialize to "{}"). Base64 crosses that boundary safely;
-    // @keetar/core's ByteUtils already has the codecs.
+    // Import (§9): resolve group paths, creating folders as needed to avoid duplication.
+    async importEntries(groupUuid: string, records: VaultEntryRecord[]): Promise<{ imported: number }> {
+        const db = this.requireUnlocked();
+        const targetGroup = this.requireGroup(groupUuid);
+        const groupCache = new Map<string, KdbxGroup>();
+        for (const record of records) {
+            const group = record.group
+                ? resolveGroupPath(db, targetGroup, record.group, groupCache)
+                : targetGroup;
+            await createEntryFromRecord(db, group, record);
+        }
+        await this.persist();
+        return { imported: records.length };
+    }
+
+    // Export (§9): walk tree excluding recycle bin, hand to format writers.
+    exportVault(format: 'csv' | 'xml'): string {
+        const db = this.requireUnlocked();
+        const records = kdbxToRecords(db);
+        return format === 'csv' ? exportToCsv(records) : exportToXml(records);
+    }
+
+    // Combine vaults: open secondary vault for merging (uses heuristic dedup, not object identity).
+    async openSecondaryVault(data: ArrayBuffer, password: string): Promise<VaultSummary> {
+        const credentials = new KdbxCredentials(ProtectedValue.fromString(password));
+        const db = await Kdbx.load(data, credentials);
+        this.secondaryDb = db;
+        this.pendingCombine = undefined;
+        return summarize(db);
+    }
+
+    closeSecondaryVault(): void {
+        this.secondaryDb = undefined;
+        this.pendingCombine = undefined;
+    }
+
+    // Compute conflict groups; auto-resolve identical 1:1 pairs (same password = unchanged entry).
+    previewCombine(): { conflicts: CombineConflict[]; nonConflictingCount: number; identicalCount: number } {
+        const db = this.requireUnlocked();
+        if (!this.secondaryDb) {
+            throw new Error('no secondary vault open');
+        }
+        const primaryRecords = kdbxToRecords(db);
+        const secondaryRecords = kdbxToRecords(this.secondaryDb);
+        const allGroups = findDuplicateGroups(primaryRecords, secondaryRecords);
+        const { identical, divergent } = partitionByPasswordMatch(allGroups);
+        const nonConflicting = findNonConflicting(secondaryRecords, allGroups);
+        this.pendingCombine = { identicalGroups: identical, divergentGroups: divergent, nonConflicting };
+        return {
+            conflicts: divergent.map((group) => ({
+                key: group.key,
+                primary: group.primary.map(toConflictEntry),
+                secondary: group.secondary.map(toConflictEntry)
+            })),
+            nonConflictingCount: nonConflicting.length,
+            identicalCount: identical.length
+        };
+    }
+
+    // Merge matched pairs field-by-field; 'keep-both' forking imports separately; ambiguous groups use whole-entry behavior.
+    async applyCombine(
+        groupUuid: string,
+        resolutions: Record<string, CombineResolution>
+    ): Promise<{ imported: number; merged: number; replaced: number }> {
+        const db = this.requireUnlocked();
+        const secondaryDb = this.secondaryDb;
+        if (!secondaryDb || !this.pendingCombine) {
+            throw new Error('call previewCombine first');
+        }
+        const targetGroup = this.requireGroup(groupUuid);
+        const groupCache = new Map<string, KdbxGroup>();
+        let imported = 0;
+        let merged = 0;
+        let replaced = 0;
+
+        const importRecord = async (record: IdentifiedRecord) => {
+            const group = record.group
+                ? resolveGroupPath(db, targetGroup, record.group, groupCache)
+                : targetGroup;
+            const sourceEntry = findEntry(secondaryDb.getDefaultGroup(), record.uuid);
+            await createEntryFromRecord(db, group, record, sourceEntry);
+            imported++;
+        };
+
+        const mergeInto = async (
+            primaryRecord: IdentifiedRecord,
+            secondaryRecord: IdentifiedRecord,
+            resolution: 'keep-a' | 'keep-b'
+        ) => {
+            const entry = findEntry(db.getDefaultGroup(), primaryRecord.uuid);
+            const sourceEntry = findEntry(secondaryDb.getDefaultGroup(), secondaryRecord.uuid);
+            if (entry && sourceEntry) {
+                await mergeRecordIntoEntry(db, entry, secondaryRecord, resolution, sourceEntry);
+                merged++;
+            }
+        };
+
+        // Auto-resolved identical pairs: still merge non-password fields that may differ.
+        for (const group of this.pendingCombine.identicalGroups) {
+            await mergeInto(group.primary[0], group.secondary[0], 'keep-a');
+        }
+
+        for (const group of this.pendingCombine.divergentGroups) {
+            const resolution = resolutions[group.key] ?? 'keep-a';
+            const isCleanPair = group.primary.length === 1 && group.secondary.length === 1;
+
+            if (resolution === 'keep-both') {
+                for (const secondaryRecord of group.secondary) {
+                    await importRecord(secondaryRecord);
+                }
+                continue;
+            }
+            if (isCleanPair) {
+                await mergeInto(group.primary[0], group.secondary[0], resolution);
+                continue;
+            }
+            // Ambiguous multiplicity: fall back to whole-entry replace-or-skip.
+            if (resolution === 'keep-a') {
+                continue;
+            }
+            for (const primaryRecord of group.primary) {
+                const entry = findEntry(db.getDefaultGroup(), primaryRecord.uuid);
+                if (entry) {
+                    db.remove(entry);
+                    replaced++;
+                }
+            }
+            for (const secondaryRecord of group.secondary) {
+                await importRecord(secondaryRecord);
+            }
+        }
+
+        for (const record of this.pendingCombine.nonConflicting) {
+            await importRecord(record);
+        }
+
+        await this.persist();
+        this.closeSecondaryVault();
+        return { imported, merged, replaced };
+    }
+
+    // On-demand favicon download as custom icon (§9 addendum); no dedup like binaries.
+    async setCustomIconFromFavicon(entryUuid: string): Promise<void> {
+        const db = this.requireUnlocked();
+        const entry = this.requireEntry(entryUuid);
+        await this.applyFaviconToEntry(db, entry);
+        await this.persist();
+    }
+
+    // Bulk favicon fetch: concurrent per-entry fetches with per-entry error tolerance (§14).
+    async fetchMissingFavicons(): Promise<{ updated: number; failed: number; skipped: number }> {
+        const db = this.requireUnlocked();
+        const recycleBinUuid = db.meta.recycleBinUuid;
+        const candidates: KdbxEntry[] = [];
+        let skipped = 0;
+        for (const entry of db.getDefaultGroup().allEntries()) {
+            if (recycleBinUuid && isInGroup(entry, recycleBinUuid)) {
+                continue;
+            }
+            if (entry.customIcon || !fieldText(entry.fields.get('URL'))) {
+                skipped++;
+                continue;
+            }
+            candidates.push(entry);
+        }
+
+        let updated = 0;
+        let failed = 0;
+        await runWithConcurrency(candidates, FAVICON_FETCH_CONCURRENCY, async (entry) => {
+            try {
+                await this.applyFaviconToEntry(db, entry);
+                updated++;
+            } catch {
+                failed++;
+            }
+        });
+
+        if (updated > 0) {
+            await this.persist();
+        }
+        return { updated, failed, skipped };
+    }
+
+    private async applyFaviconToEntry(db: Kdbx, entry: KdbxEntry): Promise<void> {
+        const url = fieldText(entry.fields.get('URL'));
+        if (!url) {
+            throw new Error('entry has no URL to fetch a favicon from');
+        }
+        const pngData = await fetchFaviconPng(url);
+        const iconUuid = KdbxUuid.random();
+        db.meta.customIcons.set(iconUuid.id, { data: pngData, lastModified: new Date() });
+        entry.customIcon = iconUuid;
+        entry.times.update();
+    }
+
+    // Use dataBase64, not ArrayBuffer (JSON-ifiable payload requirement).
     async addAttachment(entryUuid: string, name: string, dataBase64: string): Promise<void> {
         const db = this.requireUnlocked();
         const entry = this.requireEntry(entryUuid);
@@ -310,20 +543,14 @@ class VaultSession {
         return ByteUtils.bytesToBase64(resolveBinary(binary));
     }
 
-    // Serializes the *entire current tree*, not an incremental diff — so if
-    // this throws (e.g. file permission lapsed), the in-memory edit above
-    // still stands, and the very next mutation's save attempt naturally
-    // retries writing everything, including this one. No separate retry
-    // mechanism needed; the failure is surfaced as an error on the mutation
-    // that triggered it, not silently deferred (§14).
+    // Serialize entire tree; failure surfaces as error on triggering mutation (§14).
     private async persist(): Promise<void> {
         if (this.state.status !== 'unlocked') {
             throw new Error('vault is locked');
         }
-        const { uuid, db } = this.state;
+        const { db, provider, path } = this.state;
         const data = await db.save();
-        const provider = new LocalFileProvider(uuid);
-        await provider.write('', data);
+        await provider.write(path, data);
     }
 
     private requireUnlocked(): Kdbx {
@@ -357,6 +584,117 @@ function fieldText(field: KdbxEntryField | undefined): string {
         return '';
     }
     return typeof field === 'string' ? field : field.getText();
+}
+
+function kdbxToRecords(db: Kdbx): IdentifiedRecord[] {
+    const recycleBinUuid = db.meta.recycleBinUuid;
+    const records: IdentifiedRecord[] = [];
+    const walk = (group: KdbxGroup, path: string[]) => {
+        if (recycleBinUuid && group.uuid.equals(recycleBinUuid)) {
+            return;
+        }
+        for (const entry of group.entries) {
+            records.push({
+                uuid: entry.uuid.id,
+                title: fieldText(entry.fields.get('Title')),
+                username: fieldText(entry.fields.get('UserName')),
+                password: fieldText(entry.fields.get('Password')),
+                url: fieldText(entry.fields.get('URL')),
+                notes: fieldText(entry.fields.get('Notes')),
+                group: path.length ? path.join('/') : undefined,
+                tags: entry.tags.length ? entry.tags : undefined,
+                totpSecret:
+                    fieldText(entry.fields.get('otp')) ||
+                    fieldText(entry.fields.get('TOTP Seed')) ||
+                    undefined,
+                icon: entry.icon
+            });
+        }
+        for (const subGroup of group.groups) {
+            walk(subGroup, [...path, subGroup.name ?? '']);
+        }
+    };
+    walk(db.getDefaultGroup(), []);
+    return records;
+}
+
+// sourceEntry is only from combine-vaults; importers don't have live entries to copy attachments from.
+async function createEntryFromRecord(
+    db: Kdbx,
+    group: KdbxGroup,
+    record: VaultEntryRecord,
+    sourceEntry?: KdbxEntry
+): Promise<KdbxEntry> {
+    const entry = db.createEntry(group);
+    applyFields(db, entry, {
+        title: record.title,
+        username: record.username,
+        password: record.password,
+        url: record.url,
+        notes: record.notes
+    });
+    if (record.tags?.length) {
+        entry.tags = record.tags;
+    }
+    if (record.totpSecret) {
+        entry.fields.set('otp', record.totpSecret);
+    }
+    if (record.icon !== undefined && record.icon !== Consts.Icons.Key) {
+        entry.icon = record.icon;
+    }
+    if (sourceEntry) {
+        // Fresh entry: no collision concerns, copy all attachments.
+        await copyAttachments(db, entry, sourceEntry, true);
+    }
+    return entry;
+}
+
+function toConflictEntry(record: IdentifiedRecord): CombineConflictEntry {
+    return { uuid: record.uuid, title: record.title, username: record.username, url: record.url };
+}
+
+// Merge matched pairs field-by-field; empty fields yield to populated ones; tags union (§9 addendum).
+async function mergeRecordIntoEntry(
+    db: Kdbx,
+    entry: KdbxEntry,
+    record: VaultEntryRecord,
+    resolution: 'keep-a' | 'keep-b',
+    sourceEntry: KdbxEntry
+): Promise<void> {
+    const preferSecondary = resolution === 'keep-b';
+    applyFields(db, entry, {
+        title: mergeStringField(fieldText(entry.fields.get('Title')), record.title, preferSecondary),
+        username: mergeStringField(fieldText(entry.fields.get('UserName')), record.username, preferSecondary),
+        password: mergeStringField(fieldText(entry.fields.get('Password')), record.password, preferSecondary),
+        url: mergeStringField(fieldText(entry.fields.get('URL')), record.url, preferSecondary),
+        notes: mergeStringField(fieldText(entry.fields.get('Notes')), record.notes, preferSecondary)
+    });
+    entry.tags = Array.from(new Set([...entry.tags, ...(record.tags ?? [])]));
+    const existingTotp = fieldText(entry.fields.get('otp')) || fieldText(entry.fields.get('TOTP Seed'));
+    const mergedTotp = mergeStringField(existingTotp, record.totpSecret ?? '', preferSecondary);
+    if (mergedTotp && mergedTotp !== existingTotp) {
+        entry.fields.set('otp', mergedTotp);
+    }
+    entry.icon = mergeIcon(entry.icon, record.icon, preferSecondary);
+    await copyAttachments(db, entry, sourceEntry, preferSecondary);
+    entry.times.update();
+}
+
+// Additive attachment merge: missing attachments added; collisions fall back to preferSecondary.
+async function copyAttachments(
+    db: Kdbx,
+    targetEntry: KdbxEntry,
+    sourceEntry: KdbxEntry,
+    preferSecondary: boolean
+): Promise<void> {
+    for (const [name, binary] of sourceEntry.binaries) {
+        if (targetEntry.binaries.has(name) && !preferSecondary) {
+            continue;
+        }
+        const data = resolveBinary(binary);
+        const copied = await db.createBinary(data);
+        targetEntry.binaries.set(name, copied);
+    }
 }
 
 function applyFields(db: Kdbx, entry: KdbxEntry, fields: EntryFields): void {
@@ -405,7 +743,9 @@ function summarizeEntry(entry: KdbxEntry): EntrySummary {
         title: fieldText(entry.fields.get('Title')),
         username: fieldText(entry.fields.get('UserName')),
         urls: entryUrls(entry),
-        hasTotp: Boolean(fieldText(entry.fields.get('otp')) || fieldText(entry.fields.get('TOTP Seed')))
+        hasTotp: Boolean(fieldText(entry.fields.get('otp')) || fieldText(entry.fields.get('TOTP Seed'))),
+        icon: entry.icon ?? Consts.Icons.Key,
+        hasCustomIcon: entry.customIcon !== undefined
     };
 }
 
@@ -433,6 +773,26 @@ function findEntry(group: KdbxGroup, uuid: string): KdbxEntry | undefined {
     return undefined;
 }
 
+function resolveGroupPath(
+    db: Kdbx,
+    root: KdbxGroup,
+    path: string,
+    cache: Map<string, KdbxGroup>
+): KdbxGroup {
+    let current = root;
+    let builtPath = root.uuid.id;
+    for (const segment of path.split('/').map((s) => s.trim()).filter(Boolean)) {
+        builtPath += `/${segment}`;
+        let next = cache.get(builtPath);
+        if (!next) {
+            next = current.groups.find((g) => g.name === segment) ?? db.createGroup(current, segment);
+            cache.set(builtPath, next);
+        }
+        current = next;
+    }
+    return current;
+}
+
 function findGroup(group: KdbxGroup, uuid: string): KdbxGroup | undefined {
     if (group.uuid.id === uuid) {
         return group;
@@ -453,6 +813,18 @@ function isInGroup(entry: KdbxEntry, groupUuid: Kdbx['meta']['recycleBinUuid']):
         }
     }
     return false;
+}
+
+/** Runs `task` over `items` with at most `limit` in flight at once — a fixed worker pool, not a batch-and-wait loop. */
+async function runWithConcurrency<T>(items: T[], limit: number, task: (item: T) => Promise<void>): Promise<void> {
+    let index = 0;
+    async function worker(): Promise<void> {
+        while (index < items.length) {
+            const item = items[index++];
+            await task(item);
+        }
+    }
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
 function summarize(db: Kdbx): VaultSummary {

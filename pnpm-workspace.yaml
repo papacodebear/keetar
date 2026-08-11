@@ -2,3 +2,8 @@ packages:
   - "packages/*"
 allowBuilds:
   esbuild: true
+  # google-picker-offline-loader (papacodebear/google-picker-offline-loader)
+  # is a git dependency (§7.3, §11.4) with a `prepare` script (plain `tsc`,
+  # reviewed — it's what builds dist/ from source, since the git tarball has
+  # no npm-registry publish step to produce it ahead of time).
+  google-picker-offline-loader@https://codeload.github.com/papacodebear/google-picker-offline-loader/tar.gz/6d1b66d3e93c40a0959adaade75cf4749165cb07: true

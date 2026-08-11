@@ -1,10 +1,7 @@
 import type { PrfExtensionInput } from './prf';
 import { extractVuk, isPrfEnabled } from './prf';
 
-// WebAuthn credential registration + assertion (§6.2). Only callable from a
-// document context with an active user gesture — same constraint as the
-// File System Access picker (§4.2), and for the same underlying reason
-// (browsers gate sensitive hardware/biometric prompts on real user intent).
+// WebAuthn registration & assertion require document context + user gesture (§6.2).
 
 export function isWebAuthnSupported(): boolean {
     return typeof navigator !== 'undefined' && typeof navigator.credentials !== 'undefined';
@@ -15,13 +12,7 @@ export interface EnrollResult {
     vuk: ArrayBuffer;
 }
 
-/**
- * Registers a new platform/roaming authenticator credential for this vault
- * and evaluates PRF with `prfSalt` in the same ceremony where the
- * authenticator supports doing so during creation. Falls back to an
- * immediate follow-up assertion when it doesn't — not every authenticator
- * evaluates PRF at registration time even when it supports the extension.
- */
+// Register credential; evaluate PRF at creation if supported, else via follow-up assertion.
 export async function enrollCredential(vaultUuid: string, prfSalt: ArrayBuffer): Promise<EnrollResult> {
     if (!isWebAuthnSupported()) {
         throw new Error('WebAuthn is not supported in this browser');
@@ -46,14 +37,13 @@ export async function enrollCredential(vaultUuid: string, prfSalt: ArrayBuffer):
     }
     let vuk = extractVuk(credential);
     if (!vuk) {
-        // Supported, but not evaluated during creation — get it via an
-        // immediate follow-up assertion instead (§6.2).
+        // Not evaluated during creation; get via follow-up assertion (§6.2).
         vuk = await getAssertionVuk(credential.rawId, prfSalt);
     }
     return { credentialId: credential.rawId, vuk };
 }
 
-/** Runs the unlock-time assertion ceremony (§6.2) and returns the VUK. */
+// Assertion ceremony: returns VUK for unlock (§6.2).
 export async function getAssertionVuk(credentialId: ArrayBuffer, prfSalt: ArrayBuffer): Promise<ArrayBuffer> {
     if (!isWebAuthnSupported()) {
         throw new Error('WebAuthn is not supported in this browser');

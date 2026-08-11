@@ -1,16 +1,4 @@
-/**
- * KdbxEntry API tests.
- *
- * Comprehensive tests for all entry field operations:
- * - Standard fields (Title, UserName, Password, URL, Notes)
- * - Custom fields (plain and protected)
- * - Binary attachments
- * - History management (push, remove)
- * - Auto-type configuration
- * - Entry copy
- * - Tags, icons, colors
- * - Field round-trip through save/reload
- */
+// KdbxEntry API tests: standard/custom fields, binaries, history, auto-type, copy, tags, icons
 
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import * as kdbxweb from '../../src';
@@ -41,16 +29,10 @@ describe('KdbxEntry API', () => {
         );
     }
 
-    // ---------------------------------------------------------------
-    // Standard fields
-    // ---------------------------------------------------------------
-
     describe('standard fields', () => {
         test('new entry has default fields', () => {
             const db = createDb();
             const entry = db.createEntry(db.getDefaultGroup());
-
-            // Default fields are set but empty
             expect(entry.fields.has('Title')).toBe(true);
             expect(entry.fields.has('UserName')).toBe(true);
             expect(entry.fields.has('Password')).toBe(true);
@@ -120,10 +102,6 @@ describe('KdbxEntry API', () => {
             expect(entry2.fields.get('Notes')).toBe('Test notes');
         }, 30000);
     });
-
-    // ---------------------------------------------------------------
-    // Custom fields
-    // ---------------------------------------------------------------
 
     describe('custom fields', () => {
         test('sets and gets plain custom fields', () => {
@@ -196,10 +174,6 @@ describe('KdbxEntry API', () => {
         }, 30000);
     });
 
-    // ---------------------------------------------------------------
-    // Binary attachments
-    // ---------------------------------------------------------------
-
     describe('binary attachments', () => {
         test('adds binary attachment to entry', async () => {
             const db = createDb();
@@ -262,10 +236,6 @@ describe('KdbxEntry API', () => {
             expect(entry2.binaries.has('doc.txt')).toBe(true);
         }, 30000);
     });
-
-    // ---------------------------------------------------------------
-    // History management
-    // ---------------------------------------------------------------
 
     describe('history', () => {
         test('pushHistory creates a history entry', () => {
@@ -336,10 +306,6 @@ describe('KdbxEntry API', () => {
         }, 30000);
     });
 
-    // ---------------------------------------------------------------
-    // Auto-type
-    // ---------------------------------------------------------------
-
     describe('auto-type', () => {
         test('auto-type is enabled by default', () => {
             const db = createDb();
@@ -396,10 +362,6 @@ describe('KdbxEntry API', () => {
         }, 30000);
     });
 
-    // ---------------------------------------------------------------
-    // Entry copy
-    // ---------------------------------------------------------------
-
     describe('copyFrom', () => {
         test('copies all fields', () => {
             const db = createDb();
@@ -431,7 +393,6 @@ describe('KdbxEntry API', () => {
             const copy = new kdbxweb.KdbxEntry();
             copy.copyFrom(original);
 
-            // Modify copy should not affect original
             copy.fields.set('Title', 'Modified Copy');
             expect(original.fields.get('Title')).toBe('Original');
         });
@@ -446,10 +407,6 @@ describe('KdbxEntry API', () => {
             expect(copy.uuid.id).toBe(original.uuid.id);
         });
     });
-
-    // ---------------------------------------------------------------
-    // Tags
-    // ---------------------------------------------------------------
 
     describe('tags', () => {
         test('sets and gets tags', () => {
@@ -474,10 +431,6 @@ describe('KdbxEntry API', () => {
             expect(entry2.tags).toEqual(['tag1', 'tag2']);
         }, 30000);
     });
-
-    // ---------------------------------------------------------------
-    // Icons and colors
-    // ---------------------------------------------------------------
 
     describe('icons and colors', () => {
         test('sets icon', () => {
@@ -520,10 +473,6 @@ describe('KdbxEntry API', () => {
         }, 30000);
     });
 
-    // ---------------------------------------------------------------
-    // UUID
-    // ---------------------------------------------------------------
-
     describe('UUID', () => {
         test('new entry has a non-empty UUID', () => {
             const db = createDb();
@@ -539,10 +488,6 @@ describe('KdbxEntry API', () => {
             expect(entry1.uuid.id).not.toBe(entry2.uuid.id);
         });
     });
-
-    // ---------------------------------------------------------------
-    // Times
-    // ---------------------------------------------------------------
 
     describe('times', () => {
         test('new entry has creation time', () => {
@@ -563,10 +508,6 @@ describe('KdbxEntry API', () => {
         });
     });
 
-    // ---------------------------------------------------------------
-    // Override URL
-    // ---------------------------------------------------------------
-
     describe('overrideUrl', () => {
         test('sets and gets overrideUrl', () => {
             const db = createDb();
@@ -576,17 +517,12 @@ describe('KdbxEntry API', () => {
         });
     });
 
-    // ---------------------------------------------------------------
-    // Fields with special characters
-    // ---------------------------------------------------------------
-
     describe('fields with special characters', () => {
         test('handles XML special characters in field keys', async () => {
             const db = createDb();
             const entry = db.createEntry(db.getDefaultGroup());
             entry.fields.set('Title', 'Special Chars');
             entry.fields.set('Password', kdbxweb.ProtectedValue.fromString('p'));
-            // Custom field with XML-safe special chars in value
             entry.fields.set('HTML_Field', '<div class="test">&amp;</div>');
 
             const saved = await db.save();
@@ -608,8 +544,7 @@ describe('KdbxEntry API', () => {
             const saved = await db.save();
             const db2 = await kdbxweb.Kdbx.load(saved, createCred());
             const entry2 = db2.getDefaultGroup().entries[0];
-
-            // Empty fields may round-trip as empty string
+            // Empty fields may round-trip as empty string or undefined
             const title = entry2.fields.get('Title');
             expect(title === '' || title === undefined || title === null).toBe(true);
         }, 30000);

@@ -9,20 +9,14 @@ import {
 } from './biometric-store';
 import { LocalFileProvider } from '../providers/local-file';
 
-// Enrol + unlock flow orchestration (§6.2). Enrollment runs entirely in
-// Options' own scoped, ephemeral unlock (§8.1) — it never touches the
-// shared background session, and the Kdbx instance built here to verify the
-// password exists only long enough to confirm success/failure.
+// Enroll + unlock orchestration; enrollment is scoped, ephemeral (§6.2, §8.1).
 
 export async function isBiometricEnrolled(vaultUuid: string): Promise<boolean> {
     return (await getBiometricRecord(vaultUuid)) !== undefined;
 }
 
 export async function enroll(vaultUuid: string, password: string): Promise<void> {
-    // Verify the password is actually correct before enrolling anything —
-    // a typo here should fail now, not silently surface later as a
-    // confusing "incorrect password" the first time biometric unlock is
-    // actually used (§6.2).
+    // Verify password before enrolling; typo fails now, not at first unlock (§6.2).
     const provider = new LocalFileProvider(vaultUuid);
     const data = await provider.read('');
     const credentials = new KdbxCredentials(ProtectedValue.fromString(password));
@@ -44,8 +38,7 @@ export async function enroll(vaultUuid: string, password: string): Promise<void>
             enrolledAt: new Date().toISOString()
         });
     } finally {
-        // VUK and the verification credentials/password hash go out of scope
-        // here — nothing left holding them beyond this function (§6.2 step 7).
+        // VUK and credentials out of scope (§6.2).
     }
 }
 
@@ -53,7 +46,7 @@ export async function removeEnrollment(vaultUuid: string): Promise<void> {
     await removeBiometricRecord(vaultUuid);
 }
 
-/** Runs the unlock-time WebAuthn ceremony and returns the unwrapped 32-byte password hash, ready to hand to background's UNLOCK_VAULT_WITH_HASH. */
+// Unlock-time WebAuthn ceremony; returns unwrapped 32-byte password hash.
 export async function unlockToPasswordHash(vaultUuid: string): Promise<ArrayBuffer> {
     const record = await getBiometricRecord(vaultUuid);
     if (!record) {

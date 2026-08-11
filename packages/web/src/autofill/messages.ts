@@ -1,6 +1,4 @@
-// Popup → content script, direct via chrome.tabs.sendMessage (not routed
-// through background's message-bus.ts — a different channel, scoped to
-// exactly the tab the user is looking at).
+// Popup → content script via chrome.tabs.sendMessage (direct, not via message-bus).
 export interface FillCredentialsMessage {
     type: 'FILL_CREDENTIALS';
     username?: string;

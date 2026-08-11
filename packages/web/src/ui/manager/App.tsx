@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react';
 import { ByteUtils, estimatePasswordEntropy } from '@keetar/core';
 import { sendToBackground } from '../../background/message-bus';
-import type { EntryDetail, GroupNode, PasswordHealthReport } from '../../background/vault-session';
+import { EntryIcon } from '../shared/EntryIcon';
+import type {
+    CombineConflict,
+    CombineResolution,
+    EntryDetail,
+    GroupNode,
+    PasswordHealthReport
+} from '../../background/vault-session';
 
-// Manager — full vault-content management, post-unlock only (§8.1). Owns
-// entry create/edit/delete, group tree management, attachments (§8.2). Owns
-// no settings, and never calls anything Options-flavored.
-//
-// Manager doesn't have its own unlock flow — it shares the background's
-// session with Popup (§8.1), so if the vault happens to be locked when this
-// page is opened, the only thing to do is point the user back at Popup.
+// Full vault management post-unlock: entries, groups, attachments (§8.1–8.2); shares background session with Popup.
 
 type AppState =
     | { kind: 'loading' }
@@ -83,6 +84,10 @@ function Ready({
     const [healthReport, setHealthReport] = useState<PasswordHealthReport | undefined>(undefined);
     const [healthError, setHealthError] = useState<string | undefined>(undefined);
     const [checkingHealth, setCheckingHealth] = useState(false);
+    const [showImportExport, setShowImportExport] = useState(false);
+    const [showCombine, setShowCombine] = useState(false);
+    const [fetchingFavicons, setFetchingFavicons] = useState(false);
+    const [faviconStatus, setFaviconStatus] = useState<string | undefined>(undefined);
 
     function selectGroup(groupUuid: string): void {
         void onReload({ groupUuid });
@@ -91,7 +96,23 @@ function Ready({
     function selectEntry(entryUuid: string): void {
         setHealthReport(undefined);
         setHealthError(undefined);
+        setShowImportExport(false);
+        setShowCombine(false);
         void onReload({ groupUuid: selectedGroupUuid, entryUuid });
+    }
+
+    function toggleImportExport(): void {
+        setHealthReport(undefined);
+        setHealthError(undefined);
+        setShowCombine(false);
+        setShowImportExport((shown) => !shown);
+    }
+
+    function toggleCombine(): void {
+        setHealthReport(undefined);
+        setHealthError(undefined);
+        setShowImportExport(false);
+        setShowCombine((shown) => !shown);
     }
 
     async function loadPasswordHealth(): Promise<void> {
@@ -106,6 +127,29 @@ function Ready({
             }
         } finally {
             setCheckingHealth(false);
+        }
+    }
+
+    // Bulk fetch favicons for all entries with URL but no custom icon.
+    async function fetchAllFavicons(): Promise<void> {
+        setFetchingFavicons(true);
+        setFaviconStatus(undefined);
+        try {
+            const response = await sendToBackground({ type: 'FETCH_MISSING_FAVICONS' });
+            if (!response.ok || response.type !== 'FETCH_MISSING_FAVICONS') {
+                setFaviconStatus(!response.ok ? `Failed: ${response.error}` : 'Failed to fetch favicons.');
+                return;
+            }
+            const { updated, failed } = response;
+            setFaviconStatus(
+                `Fetched ${updated} favicon${updated === 1 ? '' : 's'}` +
+                    (failed > 0 ? `, ${failed} not found or failed.` : '.')
+            );
+            if (updated > 0) {
+                await onReload({ groupUuid: selectedGroupUuid, entryUuid: selectedEntryUuid });
+            }
+        } finally {
+            setFetchingFavicons(false);
         }
     }
 
@@ -156,7 +200,21 @@ function Ready({
                     <button type="button" onClick={() => void loadPasswordHealth()} disabled={checkingHealth}>
                         {checkingHealth ? 'Checking' : 'Health'}
                     </button>
+                    <button type="button" onClick={toggleImportExport}>
+                        Import/Export
+                    </button>
+                    <button type="button" onClick={toggleCombine}>
+                        Combine Vaults
+                    </button>
+                    <button type="button" onClick={() => void fetchAllFavicons()} disabled={fetchingFavicons}>
+                        {fetchingFavicons ? 'Fetching…' : 'Fetch Favicons'}
+                    </button>
                 </div>
+                {faviconStatus && (
+                    <p className="entry-row-username" style={{ padding: '0 0.5rem' }}>
+                        {faviconStatus}
+                    </p>
+                )}
                 <GroupTreeNode
                     node={root}
                     depth={0}
@@ -182,13 +240,33 @@ function Ready({
                         className={`entry-row${entry.uuid === selectedEntryUuid ? ' selected' : ''}`}
                         onClick={() => selectEntry(entry.uuid)}
                     >
-                        <div className="entry-row-title">{entry.title || '(no title)'}</div>
-                        <div className="entry-row-username">{entry.username}</div>
+                        <EntryIcon entryUuid={entry.uuid} icon={entry.icon} hasCustomIcon={entry.hasCustomIcon} />
+                        <div className="entry-row-text">
+                            <div className="entry-row-title">{entry.title || '(no title)'}</div>
+                            <div className="entry-row-username">{entry.username}</div>
+                        </div>
                     </div>
                 ))}
             </div>
             <div className="detail-pane">
-                {healthReport ? (
+                {showImportExport ? (
+                    <ImportExportPanel
+                        selectedGroupUuid={selectedGroupUuid}
+                        selectedGroupName={selectedGroup.name || 'root'}
+                        onImported={() => {
+                            setShowImportExport(false);
+                            void onReload({ groupUuid: selectedGroupUuid });
+                        }}
+                        onClose={() => setShowImportExport(false)}
+                    />
+                ) : showCombine ? (
+                    <CombineVaultsPanel
+                        selectedGroupUuid={selectedGroupUuid}
+                        selectedGroupName={selectedGroup.name || 'root'}
+                        onCombined={() => void onReload({ groupUuid: selectedGroupUuid })}
+                        onClose={() => setShowCombine(false)}
+                    />
+                ) : healthReport ? (
                     <PasswordHealthPanel report={healthReport} onClose={() => setHealthReport(undefined)} />
                 ) : healthError ? (
                     <div className="empty-state">
@@ -247,6 +325,301 @@ function PasswordHealthPanel({ report, onClose }: { report: PasswordHealthReport
                     ))}
                 </ul>
             )}
+        </div>
+    );
+}
+
+type ImportFormat = 'csv' | 'bitwarden' | 'onepassword' | 'protonpass';
+
+const IMPORT_FORMAT_LABELS: Record<ImportFormat, string> = {
+    csv: 'CSV (generic / KeePass export)',
+    bitwarden: 'Bitwarden (JSON export)',
+    onepassword: '1Password (.1pux export)',
+    protonpass: 'Proton Pass (JSON export)'
+};
+
+function ImportExportPanel({
+    selectedGroupUuid,
+    selectedGroupName,
+    onImported,
+    onClose
+}: {
+    selectedGroupUuid: string;
+    selectedGroupName: string;
+    onImported: () => void;
+    onClose: () => void;
+}) {
+    const [importFormat, setImportFormat] = useState<ImportFormat>('csv');
+    const [busy, setBusy] = useState(false);
+    const [status, setStatus] = useState<string | undefined>(undefined);
+
+    async function handleImportFile(file: File): Promise<void> {
+        setBusy(true);
+        setStatus(undefined);
+        try {
+            const buffer = await file.arrayBuffer();
+            const dataBase64 = ByteUtils.bytesToBase64(new Uint8Array(buffer));
+            const response = await sendToBackground({
+                type: 'IMPORT_ENTRIES',
+                format: importFormat,
+                dataBase64,
+                groupUuid: selectedGroupUuid
+            });
+            if (response.ok && response.type === 'IMPORT_ENTRIES') {
+                setStatus(`Imported ${response.imported} ${response.imported === 1 ? 'entry' : 'entries'}.`);
+                onImported();
+            } else if (!response.ok) {
+                setStatus(`Import failed: ${response.error}`);
+            }
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function handleExport(format: 'csv' | 'xml'): Promise<void> {
+        setStatus(undefined);
+        const response = await sendToBackground({ type: 'EXPORT_VAULT', format });
+        if (!response.ok || response.type !== 'EXPORT_VAULT') {
+            setStatus(`Export failed: ${!response.ok ? response.error : 'unknown error'}`);
+            return;
+        }
+        const blob = new Blob([response.data], { type: format === 'csv' ? 'text/csv' : 'application/xml' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `keetar-export.${format}`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    return (
+        <div>
+            <div className="middle-pane-header">
+                <strong>Import / Export</strong>
+                <button type="button" onClick={onClose}>
+                    Close
+                </button>
+            </div>
+
+            <h4>Import</h4>
+            <p>New entries are added into "{selectedGroupName}" — select that group in the tree first if needed.</p>
+            <div className="field">
+                <label>Source format</label>
+                <select value={importFormat} onChange={(e) => setImportFormat(e.target.value as ImportFormat)}>
+                    {(Object.keys(IMPORT_FORMAT_LABELS) as ImportFormat[]).map((format) => (
+                        <option key={format} value={format}>
+                            {IMPORT_FORMAT_LABELS[format]}
+                        </option>
+                    ))}
+                </select>
+            </div>
+            <input
+                type="file"
+                disabled={busy}
+                onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                        void handleImportFile(file);
+                    }
+                    e.target.value = '';
+                }}
+            />
+
+            <h4 style={{ marginTop: '1.5rem' }}>Export</h4>
+            <p>Exports every entry outside the recycle bin, in plain text — store the file securely.</p>
+            <button type="button" onClick={() => void handleExport('csv')}>
+                Export as CSV
+            </button>{' '}
+            <button type="button" onClick={() => void handleExport('xml')}>
+                Export as XML
+            </button>
+
+            {status && <p style={{ marginTop: '1rem' }}>{status}</p>}
+        </div>
+    );
+}
+
+type CombineStep =
+    | { kind: 'pick' }
+    | {
+          kind: 'reviewing';
+          conflicts: CombineConflict[];
+          nonConflictingCount: number;
+          identicalCount: number;
+          resolutions: Record<string, CombineResolution>;
+      }
+    | { kind: 'done'; imported: number; merged: number; replaced: number };
+
+function describeConflictSide(entries: CombineConflict['primary']): string {
+    return entries.map((e) => `${e.title || '(no title)'} (${e.username})`).join(', ');
+}
+
+// Merge second .kdbx into current vault; conflicts resolved by username+domain heuristic (§9).
+function CombineVaultsPanel({
+    selectedGroupUuid,
+    selectedGroupName,
+    onCombined,
+    onClose
+}: {
+    selectedGroupUuid: string;
+    selectedGroupName: string;
+    onCombined: () => void;
+    onClose: () => void;
+}) {
+    const [step, setStep] = useState<CombineStep>({ kind: 'pick' });
+    const [pendingFile, setPendingFile] = useState<File | undefined>(undefined);
+    const [password, setPassword] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | undefined>(undefined);
+
+    // Close secondary vault if panel is dismissed (cleanup).
+    useEffect(() => {
+        return () => void sendToBackground({ type: 'CLOSE_SECONDARY_VAULT' });
+    }, []);
+
+    async function openSecondary(): Promise<void> {
+        if (!pendingFile || !password) {
+            return;
+        }
+        setBusy(true);
+        setError(undefined);
+        try {
+            const buffer = await pendingFile.arrayBuffer();
+            const dataBase64 = ByteUtils.bytesToBase64(new Uint8Array(buffer));
+            const openResponse = await sendToBackground({ type: 'OPEN_SECONDARY_VAULT', dataBase64, password });
+            if (!openResponse.ok || openResponse.type !== 'OPEN_SECONDARY_VAULT') {
+                setError(!openResponse.ok ? openResponse.error : 'Could not open the second vault.');
+                return;
+            }
+            const previewResponse = await sendToBackground({ type: 'PREVIEW_COMBINE' });
+            if (!previewResponse.ok || previewResponse.type !== 'PREVIEW_COMBINE') {
+                setError(!previewResponse.ok ? previewResponse.error : 'Could not compare vaults.');
+                await sendToBackground({ type: 'CLOSE_SECONDARY_VAULT' });
+                return;
+            }
+            const resolutions: Record<string, CombineResolution> = {};
+            for (const conflict of previewResponse.conflicts) {
+                resolutions[conflict.key] = 'keep-a';
+            }
+            setStep({
+                kind: 'reviewing',
+                conflicts: previewResponse.conflicts,
+                nonConflictingCount: previewResponse.nonConflictingCount,
+                identicalCount: previewResponse.identicalCount,
+                resolutions
+            });
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    function setResolution(key: string, resolution: CombineResolution): void {
+        if (step.kind !== 'reviewing') {
+            return;
+        }
+        setStep({ ...step, resolutions: { ...step.resolutions, [key]: resolution } });
+    }
+
+    async function apply(): Promise<void> {
+        if (step.kind !== 'reviewing') {
+            return;
+        }
+        setBusy(true);
+        setError(undefined);
+        try {
+            const response = await sendToBackground({
+                type: 'APPLY_COMBINE',
+                groupUuid: selectedGroupUuid,
+                resolutions: step.resolutions
+            });
+            if (!response.ok || response.type !== 'APPLY_COMBINE') {
+                setError(!response.ok ? response.error : 'Combine failed.');
+                return;
+            }
+            setStep({
+                kind: 'done',
+                imported: response.imported,
+                merged: response.merged,
+                replaced: response.replaced
+            });
+            onCombined();
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    return (
+        <div>
+            <div className="middle-pane-header">
+                <strong>Combine Vaults</strong>
+                <button type="button" onClick={onClose}>
+                    Close
+                </button>
+            </div>
+
+            {step.kind === 'pick' && (
+                <>
+                    <p>Open a second .kdbx file to fold its entries into "{selectedGroupName}".</p>
+                    <div className="field">
+                        <label>Second vault file</label>
+                        <input type="file" accept=".kdbx" onChange={(e) => setPendingFile(e.target.files?.[0])} />
+                    </div>
+                    <div className="field">
+                        <label>Its master password</label>
+                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+                    </div>
+                    <button type="button" disabled={!pendingFile || !password || busy} onClick={() => void openSecondary()}>
+                        {busy ? 'Opening…' : 'Open & Compare'}
+                    </button>
+                </>
+            )}
+
+            {step.kind === 'reviewing' && (
+                <>
+                    <p>
+                        {step.identicalCount > 0 &&
+                            `${step.identicalCount} identical ${step.identicalCount === 1 ? 'entry' : 'entries'} (same username, site, and password) will be left as-is. `}
+                        {step.conflicts.length === 0
+                            ? 'No other overlapping entries found.'
+                            : `${step.conflicts.length} ${step.conflicts.length === 1 ? 'entry needs' : 'entries need'} a decision — same username + site, but the password differs.`}{' '}
+                        {step.nonConflictingCount} other {step.nonConflictingCount === 1 ? 'entry' : 'entries'} will import automatically.
+                    </p>
+                    {step.conflicts.map((conflict) => (
+                        <div key={conflict.key} className="field">
+                            <div>
+                                <strong>Existing:</strong> {describeConflictSide(conflict.primary)}
+                            </div>
+                            <div>
+                                <strong>Incoming:</strong> {describeConflictSide(conflict.secondary)}
+                            </div>
+                            <select
+                                value={step.resolutions[conflict.key]}
+                                onChange={(e) => setResolution(conflict.key, e.target.value as CombineResolution)}
+                            >
+                                <option value="keep-a">Keep existing</option>
+                                <option value="keep-b">Keep incoming</option>
+                                <option value="keep-both">Keep both</option>
+                            </select>
+                        </div>
+                    ))}
+                    <button type="button" disabled={busy} onClick={() => void apply()}>
+                        {busy ? 'Combining…' : 'Combine'}
+                    </button>
+                </>
+            )}
+
+            {step.kind === 'done' && (
+                <p>
+                    Imported {step.imported} new {step.imported === 1 ? 'entry' : 'entries'}, merged{' '}
+                    {step.merged} matched {step.merged === 1 ? 'entry' : 'entries'}
+                    {step.replaced > 0
+                        ? `, replaced ${step.replaced} existing ${step.replaced === 1 ? 'entry' : 'entries'}`
+                        : ''}
+                    .
+                </p>
+            )}
+
+            {error && <p className="empty-state">{error}</p>}
         </div>
     );
 }
@@ -359,6 +732,8 @@ function EntryDetailPanel({
     const [entry, setEntry] = useState<EntryDetail | undefined>(undefined);
     const [showPassword, setShowPassword] = useState(false);
     const [savedFlash, setSavedFlash] = useState(false);
+    const [fetchingFavicon, setFetchingFavicon] = useState(false);
+    const [faviconError, setFaviconError] = useState<string | undefined>(undefined);
 
     useEffect(() => {
         void load();
@@ -415,6 +790,22 @@ function EntryDetailPanel({
         await load();
     }
 
+    async function useFavicon(): Promise<void> {
+        setFetchingFavicon(true);
+        setFaviconError(undefined);
+        try {
+            const response = await sendToBackground({ type: 'FETCH_FAVICON_ICON', entryUuid });
+            if (!response.ok) {
+                setFaviconError(response.error);
+                return;
+            }
+            await load();
+            flashSaved();
+        } finally {
+            setFetchingFavicon(false);
+        }
+    }
+
     async function downloadAttachment(name: string): Promise<void> {
         const response = await sendToBackground({ type: 'GET_ATTACHMENT', entryUuid, name });
         if (!response.ok || response.type !== 'GET_ATTACHMENT') {
@@ -436,6 +827,13 @@ function EntryDetailPanel({
 
     return (
         <div>
+            <div className="entry-detail-header">
+                <EntryIcon entryUuid={entry.uuid} icon={entry.icon} hasCustomIcon={entry.hasCustomIcon} size={28} />
+                <button type="button" disabled={!entry.url || fetchingFavicon} onClick={() => void useFavicon()}>
+                    {fetchingFavicon ? 'Fetching…' : 'Use site favicon'}
+                </button>
+                {faviconError && <span className="entry-row-username">{faviconError}</span>}
+            </div>
             <div className="field">
                 <label>Title</label>
                 <input

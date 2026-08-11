@@ -1,15 +1,4 @@
-/**
- * Cross-implementation compatibility tests using test databases from keepass-rs.
- * Source: https://github.com/sseemayer/keepass-rs (MIT license)
- *
- * These tests verify that our KDBX4 implementation can read databases created
- * by keepass-rs, covering various KDF + cipher combinations.
- *
- * NOTE: Many keepass-rs test databases use Argon2 with >=256MB memory, which
- * exceeds the 128MB WASM heap of our test argon2-asm module. Those tests are
- * skipped here and marked accordingly. They would pass with a production
- * Argon2 implementation (e.g., argon2-browser with dynamic memory).
- */
+// Cross-implementation tests with keepass-rs KDBX4 databases (MIT license); high-memory Argon2 tests skipped
 
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -33,10 +22,6 @@ describe('keepass-rs interop', () => {
     afterAll(() => {
         kdbxweb.CryptoEngine.setArgon2Impl(undefined as any);
     });
-
-    // ---------------------------------------------------------------
-    // KDBX4 with AES KDF (no Argon2 needed - works with test module)
-    // ---------------------------------------------------------------
 
     describe('KDBX4 with password + AES KDF + AES cipher', () => {
         test('loads and has valid structure', async () => {
@@ -67,10 +52,6 @@ describe('keepass-rs interop', () => {
         }, 30000);
     });
 
-    // ---------------------------------------------------------------
-    // KDBX4 fuzzing database (low round Argon2 - fits in 128MB)
-    // ---------------------------------------------------------------
-
     describe('KDBX4 with few rounds (fuzzing db)', () => {
         test('loads with password "demopass"', async () => {
             const cred = new kdbxweb.Credentials(
@@ -86,11 +67,7 @@ describe('keepass-rs interop', () => {
         }, 30000);
     });
 
-    // ---------------------------------------------------------------
-    // KDBX4 with high-memory Argon2 (skipped: argon2-asm 128MB limit)
-    // These databases use default KeePass Argon2 settings (256MB+).
-    // They work with argon2-browser or native Argon2 in production.
-    // ---------------------------------------------------------------
+    // High-memory Argon2 tests (skipped: argon2-asm 128MB limit, require 256MB+ in production)
 
     describe('KDBX4 with high-memory Argon2 (require >128MB WASM)', () => {
         test.skip('Argon2d KDF + AES cipher', () => {
@@ -110,8 +87,7 @@ describe('keepass-rs interop', () => {
         });
 
         test.skip('Argon2d KDF + Twofish cipher (unsupported cipher)', () => {
-            // File: test_db_kdbx4_with_password_argon2_twofish.kdbx, password: "demopass"
-            // Even if Argon2 passed, Twofish is not supported and should throw Unsupported.
+            // Twofish not supported even with valid Argon2
         });
 
         test.skip('Argon2id KDF + Twofish cipher (unsupported cipher)', () => {
@@ -138,10 +114,6 @@ describe('keepass-rs interop', () => {
             // File: test_db_kdbx4_with_keyfile_v2_alt.kdbx, keyfile: .keyx, password: "123123"
         });
     });
-
-    // ---------------------------------------------------------------
-    // KDBX3 files - should be rejected with InvalidVersion
-    // ---------------------------------------------------------------
 
     describe('KDBX3 files (should be rejected)', () => {
         test('rejects KDBX3 with password', async () => {
@@ -180,10 +152,6 @@ describe('keepass-rs interop', () => {
             }
         });
     });
-
-    // ---------------------------------------------------------------
-    // Broken files - should produce errors, not crashes
-    // ---------------------------------------------------------------
 
     describe('broken files', () => {
         test('rejects random data', async () => {

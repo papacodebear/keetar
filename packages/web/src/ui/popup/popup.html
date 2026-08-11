@@ -14,7 +14,30 @@
       }
       .panel { display: flex; flex-direction: column; gap: 0.5rem; }
       .hint { color: #666; }
-      .vault-name { font-weight: 600; margin: 0; }
+      .vault-status {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
+        padding-bottom: 0.4rem;
+        border-bottom: 1px solid rgba(127, 127, 127, 0.3);
+      }
+      .vault-status-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+      .vault-status-matches { color: #666; font-size: 0.9em; flex-shrink: 0; }
+      .view-all-button { align-self: flex-start; }
+      .gear-button, .disconnect-button {
+        flex-shrink: 0;
+        border: none;
+        background: none;
+        cursor: pointer;
+        line-height: 1;
+        padding: 0.2rem 0.3rem;
+      }
+      .gear-button { font-size: 14px; }
+      .disconnect-button { font-size: 13px; color: #c00; }
+      .choice-buttons { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+      .choice-buttons button { flex: 1; padding: 0.6rem; }
+      .panel-box { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; }
       input[type='password'], input[type='text'] {
         font-size: 13px;
         padding: 0.4rem;
@@ -36,10 +59,12 @@
         gap: 0.5rem;
       }
       .entry-row.matched { background: rgba(60, 130, 246, 0.08); border-radius: 4px; padding-left: 0.3rem; }
-      .entry-info { min-width: 0; }
+      .entry-info { min-width: 0; flex: 1; }
       .entry-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .entry-username { color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .entry-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
+      .entry-icon { flex-shrink: 0; border-radius: 3px; object-fit: contain; }
+      .entry-icon-fallback { display: inline-block; border-radius: 50%; background: rgba(127, 127, 127, 0.3); }
       .empty { color: #666; padding: 0.5rem 0; }
     </style>
   </head>

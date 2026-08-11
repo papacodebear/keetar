@@ -8,17 +8,10 @@ const EmptySha512 =
     'cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce' +
     '47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e';
 
-// maxRandomQuota is the max number of random bytes you can asks for from the cryptoEngine
-// https://developer.mozilla.org/en-US/docs/Web/API/Crypto/getRandomValues
+// Max bytes per crypto.getRandomValues call (MDN limit)
 const MaxRandomQuota = 65536;
 
-// crypto.subtle's real runtime API accepts BufferSource (ArrayBuffer or any
-// ArrayBufferView), and callers throughout this codebase pass both — narrow
-// this to just what each function *returns* (always a fresh ArrayBuffer),
-// not what it accepts. Pinned to Uint8Array<ArrayBuffer> rather than the bare
-// (TS 5.7+ default) Uint8Array<ArrayBufferLike>: BufferSource's ArrayBufferView
-// requires a concrete ArrayBuffer, not the wider ArrayBufferLike (which also
-// admits SharedArrayBuffer).
+// Narrow accepted input types to what functions actually return (fresh ArrayBuffer only)
 type BufferLike = ArrayBuffer | Uint8Array<ArrayBuffer>;
 
 export function sha256(data: BufferLike): Promise<ArrayBuffer> {

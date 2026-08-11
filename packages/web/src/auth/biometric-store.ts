@@ -1,18 +1,6 @@
 import { ByteUtils } from '@keetar/core';
 
-// OPFS-backed storage for the per-vault biometric record (§4.1, §6.2). One
-// record per vault, not the three separate files an earlier draft of the
-// architecture doc split this into — credentialId, prfSalt, and the wrapped
-// password hash are always read and written together.
-//
-// Unlike local-file.ts's FileSystemFileHandle store (IndexedDB, because a
-// handle isn't JSON-serializable and chrome.storage can't hold it), there's
-// no such forcing constraint here — this is small JSON-serializable data, so
-// it follows §4.1 as written and uses real OPFS. OPFS is reachable from both
-// the service worker and extension pages (unlike the picker-driven File
-// System Access API, OPFS needs no user gesture), which is exactly why
-// unlock (background) and enrollment (Options) can both use this module
-// unmodified.
+// OPFS biometric record per vault: credentialId, prfSalt, wrapped hash always together (§4.1, §6.2).
 
 export interface BiometricRecord {
     credentialIdBase64: string;

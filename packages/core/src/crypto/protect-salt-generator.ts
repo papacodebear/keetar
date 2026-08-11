@@ -4,10 +4,7 @@ import { CrsAlgorithm, ErrorCodes } from '../defs/consts.js';
 import { KdbxError } from '../errors/kdbx-error.js';
 import * as CryptoEngine from '../crypto/crypto-engine.js';
 
-/**
- * Protect information used for decrypt and encrypt protected data fields
- * @constructor
- */
+// Generates salts for decrypting/encrypting protected data fields.
 export class ProtectSaltGenerator {
     private _algo: ChaCha20;
 

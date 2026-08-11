@@ -1,9 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { matchEntries, type MatchableEntry } from '../../src/autofill/matcher';
 
-// Table-driven per §10.2. Each case is a single entry (one URL, unless
-// otherwise noted) matched against one tab URL, asserting the highest tier
-// that fires (or no match at all).
+// Table-driven: entry URL vs. tab URL, asserting the highest matching tier.
 interface Case {
     label: string;
     entryUrl: string;
@@ -22,8 +20,6 @@ const cases: Case[] = [
     { label: 'identical URL with query string', entryUrl: 'https://example.com/login?x=1', tabUrl: 'https://example.com/login?x=1', expectedTier: 1 },
 
     // --- Tier 2: exact hostname, URL otherwise differs ---
-    // Corrected from an earlier ARCHITECTURE.md draft, which mislabeled this
-    // pair as tier 1 — see §10.2's note on this exact case.
     { label: 'same host, different path', entryUrl: 'https://accounts.google.com', tabUrl: 'https://accounts.google.com/login', expectedTier: 2 },
     { label: 'same host, different query', entryUrl: 'https://example.com/login', tabUrl: 'https://example.com/login?x=1', expectedTier: 2 },
     { label: 'same host, different protocol', entryUrl: 'http://example.com', tabUrl: 'https://example.com', expectedTier: 2 },

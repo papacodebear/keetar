@@ -18,5 +18,5 @@
     }
   ],
   "host_permissions": ["http://*/*", "https://*/*"],
-  "permissions": ["storage", "idle", "alarms", "clipboardWrite", "tabs"]
+  "permissions": ["storage", "idle", "alarms", "clipboardWrite", "tabs", "identity"]
 }

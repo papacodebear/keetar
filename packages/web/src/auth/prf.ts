@@ -1,7 +1,4 @@
-// PRF extension handling (§6.2). TypeScript's bundled WebAuthn types don't
-// include the `prf` extension yet (still a newer, evolving part of the
-// spec), so its shapes are defined locally here rather than assumed
-// available from lib.dom.d.ts.
+// PRF extension types (not yet in TypeScript lib.dom.d.ts; §6.2).
 
 export interface PrfExtensionInput {
     prf: { eval?: { first: BufferSource } };
@@ -18,12 +15,12 @@ function getExtensionResults(credential: PublicKeyCredential): PrfExtensionResul
     return credential.getClientExtensionResults() as PrfExtensionResults;
 }
 
-/** The 32-byte VUK, if the authenticator evaluated PRF during this ceremony — undefined otherwise (§6.3: not every authenticator does, even when it supports PRF). */
+// Extract VUK if PRF was evaluated in ceremony (not all authenticators do; §6.3).
 export function extractVuk(credential: PublicKeyCredential): ArrayBuffer | undefined {
     return getExtensionResults(credential).prf?.results?.first;
 }
 
-/** Whether this credential supports PRF at all — distinct from whether *this* ceremony evaluated it (see extractVuk). */
+// Check if credential supports PRF (distinct from whether ceremony evaluated it).
 export function isPrfEnabled(credential: PublicKeyCredential): boolean {
     return getExtensionResults(credential).prf?.enabled === true;
 }

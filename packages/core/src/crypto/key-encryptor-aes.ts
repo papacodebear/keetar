@@ -5,13 +5,7 @@ const maxRoundsPreIteration = 10000;
 const aesBlockSize = 16;
 const credentialSize = 32;
 
-/*
-In order to simulate multiple rounds of ECB encryption, we do CBC encryption
-across a zero buffer of large length with the IV being the desired plaintext.
-The zero buffer does not contribute to the xor, so xoring the previous block
-with the next one simulates running ECB multiple times. We limit the maximum
-size of the zero buffer to prevent enormous memory usage.
-*/
+// CBC encryption across zero buffer simulates ECB by xoring previous block output as next IV.
 
 export function encrypt(
     credentials: Uint8Array,

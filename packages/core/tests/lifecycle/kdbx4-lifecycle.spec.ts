@@ -2,12 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import * as kdbxweb from '../../src';
 import { argon2 } from '../test-support/argon2';
 
-/**
- * KDBX4 Full Database Lifecycle Tests
- *
- * Tests the complete lifecycle: create -> populate -> save -> reload -> verify
- * This is the most critical test suite for the database library.
- */
+/** Test full lifecycle: create → populate → save → reload → verify. */
 describe('KDBX4 Lifecycle', () => {
     beforeAll(() => {
         kdbxweb.CryptoEngine.setArgon2Impl(argon2);

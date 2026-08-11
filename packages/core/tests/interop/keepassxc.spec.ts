@@ -1,13 +1,4 @@
-/**
- * Cross-implementation compatibility tests using test databases from KeePassXC.
- * Source: https://github.com/keepassxreboot/keepassxc (GPLv2/GPLv3 license)
- *
- * These tests verify that our KDBX4 implementation can read databases created
- * by KeePassXC, the most popular open-source KeePass client.
- *
- * Only KDBX4 format files are tested (version bytes 0x00000400).
- * KDBX3 files from KeePassXC are tested in keepass-rs.spec.ts rejection tests.
- */
+// Cross-implementation tests with KeePassXC KDBX4 databases (GPLv2/GPLv3 license)
 
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -32,10 +23,7 @@ describe('KeePassXC interop', () => {
         kdbxweb.CryptoEngine.setArgon2Impl(undefined as any);
     });
 
-    // ---------------------------------------------------------------
-    // Format400.kdbx — KDBX4 with Argon2 (1MB memory), password "t"
-    // Created by KeePassXC as a format compliance test file.
-    // ---------------------------------------------------------------
+    // Format400.kdbx: KeePassXC format compliance test file
 
     describe('Format400.kdbx (KDBX4, Argon2 1MB, password "t")', () => {
         test('loads and has valid root group', async () => {
@@ -55,7 +43,7 @@ describe('KeePassXC interop', () => {
             const db = await kdbxweb.Kdbx.load(readFile('Format400.kdbx'), cred);
             const root = db.getDefaultGroup();
 
-            // KeePassXC test expects: 1 entry with title "Format400", username "Format400"
+            // Expects 1 entry with title/username "Format400"
             expect(root.entries.length).toBe(1);
             const entry = root.entries[0];
             expect(entry.fields.get('Title')).toBe('Format400');
@@ -68,8 +56,7 @@ describe('KeePassXC interop', () => {
             );
             const db = await kdbxweb.Kdbx.load(readFile('Format400.kdbx'), cred);
             const entry = db.getDefaultGroup().entries[0];
-            // KeePassXC test: entry->attributes()->value("Format400") == "Format400"
-            // The field may be stored as a ProtectedValue depending on memory protection settings
+            // Field may be ProtectedValue depending on memory protection
             const fieldValue = entry.fields.get('Format400');
             if (fieldValue instanceof kdbxweb.ProtectedValue) {
                 expect(fieldValue.getText()).toBe('Format400');
@@ -84,7 +71,6 @@ describe('KeePassXC interop', () => {
             );
             const db = await kdbxweb.Kdbx.load(readFile('Format400.kdbx'), cred);
             const entry = db.getDefaultGroup().entries[0];
-            // KeePassXC test: entry->attachments()->keys().size() == 1
             expect(entry.binaries.size).toBe(1);
             expect(entry.binaries.has('Format400')).toBe(true);
         }, 30000);
@@ -98,10 +84,7 @@ describe('KeePassXC interop', () => {
         }, 30000);
     });
 
-    // ---------------------------------------------------------------
-    // NewDatabaseBrowser.kdbx — KDBX4 with AES KDF, password "a"
-    // Used by KeePassXC browser integration tests.
-    // ---------------------------------------------------------------
+    // NewDatabaseBrowser.kdbx: KeePassXC browser integration test file
 
     describe('NewDatabaseBrowser.kdbx (KDBX4, AES KDF, password "a")', () => {
         test('loads successfully', async () => {
@@ -142,14 +125,9 @@ describe('KeePassXC interop', () => {
                 readFile('NewDatabaseBrowser.kdbx'),
                 cred
             );
-            // Older KeePassXC builds may write "KeePass" as the generator
             expect(db.meta.generator).toMatch(/KeePass/);
         }, 30000);
     });
-
-    // ---------------------------------------------------------------
-    // Wrong password tests
-    // ---------------------------------------------------------------
 
     describe('wrong password rejection', () => {
         test('rejects Format400.kdbx with wrong password', async () => {

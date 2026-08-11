@@ -1,7 +1,4 @@
-// Storage contract (§7.1, §2.5). Type only — no implementation lives here.
-// Consumers of @keetar/core (a browser extension, a Node CLI, a future
-// desktop app) implement this against their own storage without pulling in
-// any extension-specific code.
+// Storage contract interface — consumers implement this against their storage backend.
 
 export interface FileMetadata {
     lastModified: string; // ISO 8601

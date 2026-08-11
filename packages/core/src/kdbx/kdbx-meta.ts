@@ -632,10 +632,7 @@ export class KdbxMeta {
         return remoteDate > localDate;
     }
 
-    /**
-     * Creates new meta
-     * @returns {KdbxMeta}
-     */
+    /** Creates new meta */
     static create(): KdbxMeta {
         const now = new Date();
         const meta = new KdbxMeta();

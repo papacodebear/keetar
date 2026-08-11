@@ -1,22 +1,7 @@
 import { CryptoEngine } from '@keetar/core';
 
-// Loads argon2-browser's low-level WASM Module inside the MV3 service worker
-// via importScripts() rather than dynamic import(), for CSP compliance
-// (§3.1, §11.4) — MV3's default CSP disallows the remote-code patterns
-// dynamic import can trigger, but a classic-script importScripts() call
-// against a same-origin bundled file is fine.
-//
-// As in @keetar/core's test harness (packages/core/tests/test-support/argon2.ts),
-// this bypasses argon2-browser's public hash() wrapper — it hardcodes Argon2
-// version 0x13 and only accepts UTF-8 string input, but real KDBX4 files can
-// specify version 0x10 (§3.2) and our composite key/salt are raw bytes — and
-// calls the low-level WASM Module directly.
-//
-// Not yet verified against a live browser session — the WASM-loading
-// mechanics here (locateFile override, importScripts timing) are reasoned
-// through from the emscripten glue's own source, not observed working.
-// Confirm this actually decrypts a real Argon2-KDF .kdbx file before relying
-// on it.
+// Load argon2-browser's WASM Module via importScripts (Chrome MV3) or <script> (Firefox MV2).
+// Calls low-level Module directly to support Argon2 v0x10 and raw bytes (not UTF-8 strings).
 
 declare function importScripts(...urls: string[]): void;
 
@@ -46,17 +31,22 @@ let modulePromise: Promise<Argon2Module> | undefined;
 
 function loadArgon2Module(): Promise<Argon2Module> {
     if (!modulePromise) {
-        modulePromise = new Promise((resolve) => {
+        modulePromise = new Promise((resolve, reject) => {
             const Module: { locateFile: (path: string) => string; postRun?: () => void } = {
-                // background.js and wasm/argon2/ are siblings in the build
-                // output (§10.1) — argon2.js resolves argon2.wasm relative to
-                // the service worker's own location (self.location.href), not
-                // its own importScripts path, so this override is required.
-                locateFile: (path) => `wasm/argon2/${path}`,
+                // Use chrome.runtime.getURL for origin-rooted path (works from any caller).
+                locateFile: (path) => chrome.runtime.getURL(`wasm/argon2/${path}`),
                 postRun: () => resolve(Module as unknown as Argon2Module)
             };
             (self as unknown as { Module: unknown }).Module = Module;
-            importScripts('wasm/argon2/argon2.js');
+            const scriptUrl = chrome.runtime.getURL('wasm/argon2/argon2.js');
+            if (typeof importScripts === 'function') {
+                importScripts(scriptUrl);
+            } else {
+                const script = document.createElement('script');
+                script.src = scriptUrl;
+                script.onerror = () => reject(new Error('failed to load argon2.js'));
+                document.head.appendChild(script);
+            }
         });
     }
     return modulePromise;

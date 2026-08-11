@@ -1,4 +1,4 @@
-// Chrome-specific platform shim (§9.2). MV3 service worker + chrome.* APIs.
+// Chrome MV3 shim: service worker with chrome.* APIs (§9.2).
 
 export const storage = {
     async get<T>(key: string): Promise<T | undefined> {
@@ -31,6 +31,33 @@ export const alarms = {
     }
 };
 
-// No `runtime` export: message-bus.ts talks to `chrome.runtime` directly —
-// Firefox also accepts the `chrome.*` namespace for messaging (§9.1), so no
-// shim is needed there either.
+// Chrome.runtime.sendMessage returns Promise natively; Firefox needs firefox.ts shim instead.
+export const runtime = {
+    sendMessage<T>(message: unknown): Promise<T> {
+        return chrome.runtime.sendMessage(message);
+    }
+};
+
+// Same promise-return pattern for tabs.query (used for active tab matching).
+export const tabs = {
+    query(queryInfo: { active: boolean; currentWindow: boolean }): Promise<chrome.tabs.Tab[]> {
+        return chrome.tabs.query(queryInfo);
+    }
+};
+
+// Google Drive OAuth via PKCE (shared implementation; getAuthToken Chrome-only; §7.3).
+export const identity = {
+    getRedirectURL(path?: string): string {
+        return chrome.identity.getRedirectURL(path);
+    },
+    launchWebAuthFlow(options: { url: string; interactive: boolean }): Promise<string | undefined> {
+        return chrome.identity.launchWebAuthFlow(options);
+    }
+};
+
+// MV3 action.setBadgeText; Firefox MV2 uses browserAction (§5.1, §9.1).
+export const action = {
+    setBadgeText(details: { tabId: number; text: string }): void {
+        void chrome.action.setBadgeText(details);
+    }
+};

@@ -1,15 +1,4 @@
-/**
- * Error path tests for KDBX loading.
- *
- * Tests that the library produces clear, correct errors for:
- * - Wrong password
- * - Corrupted file (bit-flipped data)
- * - Truncated file (incomplete data)
- * - Zero-length file
- * - Malformed XML in inner content
- * - Non-KDBX data (random bytes, text, etc.)
- * - Missing Argon2 implementation
- */
+// Error path tests: wrong password, corrupted/truncated files, malformed XML, missing Argon2
 
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -40,10 +29,6 @@ describe('KDBX error paths', () => {
             kdbxweb.ProtectedValue.fromString('demo'),
             readResource('demo.key')
         );
-
-    // ---------------------------------------------------------------
-    // Wrong password
-    // ---------------------------------------------------------------
 
     describe('wrong password', () => {
         test('rejects with InvalidKey for wrong password', async () => {
@@ -96,16 +81,11 @@ describe('KDBX error paths', () => {
         });
     });
 
-    // ---------------------------------------------------------------
-    // Corrupted file (bit-flip in encrypted data)
-    // ---------------------------------------------------------------
-
     describe('corrupted file', () => {
         test('rejects file with flipped bit in header', async () => {
             const data = new Uint8Array(validFile());
             const corrupted = new Uint8Array(data.length);
             corrupted.set(data);
-            // Flip a bit in the header hash area (after the header fields)
             corrupted[254] ^= 0xff;
 
             try {
@@ -113,7 +93,7 @@ describe('KDBX error paths', () => {
                 throw new Error('Should have thrown');
             } catch (e) {
                 expect(e).toBeInstanceOf(kdbxweb.KdbxError);
-                // Could be FileCorrupt (header hash mismatch) or InvalidKey (HMAC mismatch)
+                // FileCorrupt (header hash) or InvalidKey (HMAC) both acceptable
                 const code = (e as kdbxweb.KdbxError).code;
                 expect(
                     code === kdbxweb.Consts.ErrorCodes.FileCorrupt ||
@@ -126,7 +106,6 @@ describe('KDBX error paths', () => {
             const data = new Uint8Array(validFile());
             const corrupted = new Uint8Array(data.length);
             corrupted.set(data);
-            // Corrupt the encrypted payload area (well past the header)
             const corruptOffset = Math.min(data.length - 1, 500);
             corrupted[corruptOffset] ^= 0xff;
 
@@ -135,7 +114,7 @@ describe('KDBX error paths', () => {
                 throw new Error('Should have thrown');
             } catch (e) {
                 expect(e).toBeInstanceOf(kdbxweb.KdbxError);
-                // Payload corruption typically triggers InvalidKey or FileCorrupt
+                // Payload corruption → InvalidKey or FileCorrupt
                 const code = (e as kdbxweb.KdbxError).code;
                 expect(
                     code === kdbxweb.Consts.ErrorCodes.FileCorrupt ||
@@ -163,10 +142,6 @@ describe('KDBX error paths', () => {
             }
         });
     });
-
-    // ---------------------------------------------------------------
-    // Truncated file
-    // ---------------------------------------------------------------
 
     describe('truncated file', () => {
         test('rejects file truncated to 8 bytes (just signatures)', async () => {
@@ -225,10 +200,6 @@ describe('KDBX error paths', () => {
         });
     });
 
-    // ---------------------------------------------------------------
-    // Zero-length file
-    // ---------------------------------------------------------------
-
     describe('zero-length file', () => {
         test('rejects empty ArrayBuffer', async () => {
             try {
@@ -267,10 +238,6 @@ describe('KDBX error paths', () => {
             }
         });
     });
-
-    // ---------------------------------------------------------------
-    // Malformed XML
-    // ---------------------------------------------------------------
 
     describe('malformed XML', () => {
         test('rejects completely malformed XML', async () => {
@@ -321,10 +288,6 @@ describe('KDBX error paths', () => {
             }
         });
     });
-
-    // ---------------------------------------------------------------
-    // Non-KDBX data
-    // ---------------------------------------------------------------
 
     describe('non-KDBX data', () => {
         test('rejects random bytes', async () => {
@@ -377,10 +340,6 @@ describe('KDBX error paths', () => {
         });
     });
 
-    // ---------------------------------------------------------------
-    // Missing Argon2 implementation
-    // ---------------------------------------------------------------
-
     describe('missing Argon2 implementation', () => {
         test('throws when Argon2 impl is not set', async () => {
             // Temporarily remove Argon2
@@ -396,10 +355,6 @@ describe('KDBX error paths', () => {
             }
         });
     });
-
-    // ---------------------------------------------------------------
-    // Invalid argument types
-    // ---------------------------------------------------------------
 
     describe('invalid arguments', () => {
         test('rejects non-ArrayBuffer data', async () => {

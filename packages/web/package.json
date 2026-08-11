@@ -10,14 +10,21 @@
   "license": "MIT",
   "scripts": {
     "clean": "rimraf dist",
-    "build": "pnpm run clean && webpack --config build/webpack.config.js --mode production",
-    "build:dev": "pnpm run clean && webpack --config build/webpack.config.js --mode development",
+    "clean:chrome": "rimraf dist/chrome",
+    "clean:firefox": "rimraf dist/firefox",
+    "build": "pnpm run build:chrome && pnpm run build:firefox",
+    "build:chrome": "pnpm run clean:chrome && webpack --config build/webpack.config.js --mode production --env browser=chrome",
+    "build:dev": "pnpm run clean:chrome && webpack --config build/webpack.config.js --mode development --env browser=chrome",
+    "build:firefox": "pnpm run clean:firefox && webpack --config build/webpack.config.js --mode production --env browser=firefox",
+    "build:firefox:dev": "pnpm run clean:firefox && webpack --config build/webpack.config.js --mode development --env browser=firefox",
+    "lint:firefox": "pnpm run build:firefox && web-ext lint --source-dir dist/firefox --no-config-discovery",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@keetar/core": "workspace:*",
     "argon2-browser": "^1.18.0",
+    "google-picker-offline-loader": "github:papacodebear/google-picker-offline-loader#6d1b66d",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "tldts": "^6.1.0"
@@ -30,9 +37,11 @@
     "@types/wicg-file-system-access": "^2023.10.7",
     "copy-webpack-plugin": "^12.0.0",
     "rimraf": "^6.0.0",
+    "terser-webpack-plugin": "^5.6.1",
     "ts-loader": "^9.5.0",
     "typescript": "~5.9.0",
     "vitest": "^2.1.0",
+    "web-ext": "^10.6.0",
     "webpack": "^5.97.0",
     "webpack-cli": "^6.0.0"
   }

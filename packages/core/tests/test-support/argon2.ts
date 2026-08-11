@@ -2,14 +2,7 @@ import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { Argon2Type, Argon2Version } from '../../src/crypto/crypto-engine';
 
-// argon2-browser's public `hash()` API hardcodes Argon2 version 0x13 and
-// only exposes UTF-8 string in/out, but real KDBX4 files can specify version
-// 0x10 or 0x13 (§3.2), and our composite key/salt are raw bytes, not text.
-// Load its low-level WASM Module directly (same one the public API wraps)
-// and call the C `argon2_hash` export ourselves so both are under our
-// control. `createRequire` goes through Node's real CJS loader rather than
-// vitest's, since the emscripten bundle reads its .wasm file relative to a
-// genuine `__dirname` at require-time.
+// Load argon2-browser's low-level WASM directly to support raw bytes and version control.
 const nodeRequire = createRequire(import.meta.url);
 
 interface Argon2Module {
@@ -39,21 +32,14 @@ let modulePromise: Promise<Argon2Module> | undefined;
 function loadArgon2Module(): Promise<Argon2Module> {
     if (!modulePromise) {
         modulePromise = new Promise((resolve) => {
-            // Node 24 ships a global `fetch`, which this build's environment
-            // sniffing mistakes for a browser-like capability, sending it down
-            // a WHATWG-fetch code path that can't resolve a plain filesystem
-            // path as a URL. Preloading the .wasm bytes ourselves as
-            // `wasmBinary` short-circuits that path entirely (checked before
-            // any fetch/streaming logic runs).
+            // Preload .wasm bytes to short-circuit Node 24's fetch sniffing issue.
             const wasmPath = nodeRequire.resolve('argon2-browser/dist/argon2.wasm');
             const wasmBinary = fs.readFileSync(wasmPath);
             const Module: { wasmBinary: Buffer; postRun?: () => void } = {
                 wasmBinary,
                 postRun: () => resolve(Module as unknown as Argon2Module)
             };
-            // argon2-browser/dist/argon2.js reads `Module` off the module-level
-            // `self`/global scope it closes over, rather than accepting an
-            // injected argument, so we hand it our config the same way.
+            // Hand config via globalThis.self to match argon2-browser's module scope convention.
             (globalThis as { self?: unknown }).self = { Module };
             nodeRequire('argon2-browser/dist/argon2.js');
         });

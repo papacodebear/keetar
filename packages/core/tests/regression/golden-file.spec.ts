@@ -1,15 +1,4 @@
-/**
- * Golden file regression tests.
- *
- * For each .kdbx file in resources/ (internal test databases):
- *   1. Load the database with known credentials
- *   2. Save it
- *   3. Reload the saved output
- *   4. Field-by-field verify all data is preserved
- *
- * This catches regressions where a code change silently alters
- * the save output or loses data during serialization.
- */
+/** Golden file regression: load, save, reload, verify data preservation. */
 
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -99,8 +88,7 @@ function compareGroups(
 
 /** Full golden file comparison for a database */
 function verifyGoldenFile(original: kdbxweb.Kdbx, reloaded: kdbxweb.Kdbx) {
-    // Meta fields
-    // Note: undefined vs "" is an acceptable difference after XML round-trip
+    // Meta fields (undefined vs "" acceptable after XML round-trip)
     expect(reloaded.meta.name).toBe(original.meta.name);
     expect(reloaded.meta.desc || '').toBe(original.meta.desc || '');
     expect(reloaded.meta.defaultUser || '').toBe(original.meta.defaultUser || '');
@@ -148,9 +136,7 @@ describe('golden file regression', () => {
             readResource('demo.key')
         );
 
-    // ---------------------------------------------------------------
     // Argon2.kdbx — Argon2d KDF + AES cipher
-    // ---------------------------------------------------------------
     test('Argon2.kdbx golden file', async () => {
         const cred = demoCredentials();
         const db1 = await kdbxweb.Kdbx.load(readResource('Argon2.kdbx'), cred);
@@ -161,9 +147,7 @@ describe('golden file regression', () => {
         verifyGoldenFile(db1, db2);
     }, 30000);
 
-    // ---------------------------------------------------------------
     // Argon2id.kdbx — Argon2id KDF + AES cipher
-    // ---------------------------------------------------------------
     test('Argon2id.kdbx golden file', async () => {
         const cred = demoCredentials();
         const db1 = await kdbxweb.Kdbx.load(readResource('Argon2id.kdbx'), cred);
@@ -174,9 +158,7 @@ describe('golden file regression', () => {
         verifyGoldenFile(db1, db2);
     }, 30000);
 
-    // ---------------------------------------------------------------
     // Argon2ChaCha.kdbx — Argon2d KDF + ChaCha20 cipher
-    // ---------------------------------------------------------------
     test('Argon2ChaCha.kdbx golden file', async () => {
         const cred = demoCredentials();
         const db1 = await kdbxweb.Kdbx.load(
@@ -190,9 +172,7 @@ describe('golden file regression', () => {
         verifyGoldenFile(db1, db2);
     }, 30000);
 
-    // ---------------------------------------------------------------
     // KDBX4.1.kdbx — KDBX 4.1 features (tags, previousParentGroup, etc.)
-    // ---------------------------------------------------------------
     test('KDBX4.1.kdbx golden file', async () => {
         const cred = new kdbxweb.Credentials(
             kdbxweb.ProtectedValue.fromString('test')
@@ -210,9 +190,7 @@ describe('golden file regression', () => {
         expect(groupWithTags.tags).toEqual(['Another tag', 'Tag1']);
     }, 30000);
 
-    // ---------------------------------------------------------------
     // Newly created database golden test
-    // ---------------------------------------------------------------
     test('newly created database golden file', async () => {
         const cred = new kdbxweb.Credentials(
             kdbxweb.ProtectedValue.fromString('golden-test')

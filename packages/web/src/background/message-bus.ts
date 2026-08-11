@@ -1,4 +1,6 @@
 import type {
+    CombineConflict,
+    CombineResolution,
     EntryDetail,
     EntryFieldName,
     EntryFields,
@@ -9,19 +11,14 @@ import type {
     VaultSummary
 } from './vault-session';
 import type { MatchResult } from '../autofill/matcher';
+import { SyncConflictError } from '../providers/opfs-cache';
+import { runtime } from '../platform';
 
-// Typed message router between popup/manager/content/background (§2.4). Only
-// the messages built so far exist — later phases (biometric unlock, import/
-// export) add more variants to these unions rather than building a separate
-// mechanism.
+// Typed message router between popup/manager/content/background (§2.4).
 
 export type KeetarRequest =
     | { type: 'UNLOCK_VAULT'; uuid: string; password: string }
-    // Popup already ran the WebAuthn ceremony and unwrapped the stored
-    // password hash itself (§6.2) — passwordHashBase64 rather than
-    // ArrayBuffer, same reasoning as ADD_ATTACHMENT/GET_ATTACHMENT below:
-    // chrome.runtime.sendMessage's documented contract is a JSON-ifiable
-    // payload, and ArrayBuffer isn't one.
+    // Biometric unlock with pre-unwrapped hash (§6.2); use base64 for JSON-ifiable payload.
     | { type: 'UNLOCK_VAULT_WITH_HASH'; uuid: string; passwordHashBase64: string }
     | { type: 'LOCK_VAULT' }
     | { type: 'GET_STATUS' }
@@ -42,7 +39,23 @@ export type KeetarRequest =
     | { type: 'DELETE_GROUP'; groupUuid: string }
     | { type: 'ADD_ATTACHMENT'; entryUuid: string; name: string; dataBase64: string }
     | { type: 'REMOVE_ATTACHMENT'; entryUuid: string; name: string }
-    | { type: 'GET_ATTACHMENT'; entryUuid: string; name: string };
+    | { type: 'GET_ATTACHMENT'; entryUuid: string; name: string }
+    | { type: 'GET_ENTRY_CUSTOM_ICON'; entryUuid: string }
+    | { type: 'FETCH_FAVICON_ICON'; entryUuid: string }
+    | { type: 'FETCH_MISSING_FAVICONS' }
+    // Use dataBase64 uniformly for all formats (1PUX is zip, simplifes decode).
+    | {
+          type: 'IMPORT_ENTRIES';
+          format: 'csv' | 'bitwarden' | 'onepassword' | 'protonpass';
+          dataBase64: string;
+          groupUuid: string;
+      }
+    | { type: 'EXPORT_VAULT'; format: 'csv' | 'xml' }
+    // Combine vaults: dataBase64 + plaintext password (one-shot, not stored).
+    | { type: 'OPEN_SECONDARY_VAULT'; dataBase64: string; password: string }
+    | { type: 'CLOSE_SECONDARY_VAULT' }
+    | { type: 'PREVIEW_COMBINE' }
+    | { type: 'APPLY_COMBINE'; groupUuid: string; resolutions: Record<string, CombineResolution> };
 
 export type KeetarResponse =
     | { ok: true; type: 'UNLOCK_VAULT'; summary: VaultSummary }
@@ -67,7 +80,23 @@ export type KeetarResponse =
     | { ok: true; type: 'ADD_ATTACHMENT' }
     | { ok: true; type: 'REMOVE_ATTACHMENT' }
     | { ok: true; type: 'GET_ATTACHMENT'; dataBase64: string }
-    | { ok: false; error: string };
+    | { ok: true; type: 'GET_ENTRY_CUSTOM_ICON'; dataBase64: string }
+    | { ok: true; type: 'FETCH_FAVICON_ICON' }
+    | { ok: true; type: 'FETCH_MISSING_FAVICONS'; updated: number; failed: number; skipped: number }
+    | { ok: true; type: 'IMPORT_ENTRIES'; imported: number }
+    | { ok: true; type: 'EXPORT_VAULT'; data: string }
+    | { ok: true; type: 'OPEN_SECONDARY_VAULT'; summary: VaultSummary }
+    | { ok: true; type: 'CLOSE_SECONDARY_VAULT' }
+    | {
+          ok: true;
+          type: 'PREVIEW_COMBINE';
+          conflicts: CombineConflict[];
+          nonConflictingCount: number;
+          identicalCount: number;
+      }
+    | { ok: true; type: 'APPLY_COMBINE'; imported: number; merged: number; replaced: number }
+    // code='SYNC_CONFLICT' distinguishes vault conflicts from other unlock failures.
+    | { ok: false; error: string; code?: 'SYNC_CONFLICT' };
 
 export type KeetarRequestHandler = (
     request: KeetarRequest,
@@ -81,7 +110,8 @@ export function registerMessageHandler(handle: KeetarRequestHandler): void {
             .catch(
                 (e): KeetarResponse => ({
                     ok: false,
-                    error: e instanceof Error ? e.message : String(e)
+                    error: e instanceof Error ? e.message : String(e),
+                    code: e instanceof SyncConflictError ? 'SYNC_CONFLICT' : undefined
                 })
             )
             .then(sendResponse);
@@ -91,5 +121,5 @@ export function registerMessageHandler(handle: KeetarRequestHandler): void {
 
 /** Sends a request from a UI surface (only usable from a document context). */
 export function sendToBackground(request: KeetarRequest): Promise<KeetarResponse> {
-    return chrome.runtime.sendMessage(request);
+    return runtime.sendMessage<KeetarResponse>(request);
 }

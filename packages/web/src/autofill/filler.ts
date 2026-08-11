@@ -1,9 +1,4 @@
-// Credential injection compatible with React/Vue/Angular (§5.3). Plain
-// `field.value = x` doesn't trigger their change detection — frameworks
-// listen through the native setter, which a direct property assignment
-// bypasses. Going through the native setter explicitly, then dispatching the
-// events those frameworks actually listen for, works everywhere.
-
+// Use native setter + dispatch events for React/Vue/Angular change detection.
 const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
     'value'

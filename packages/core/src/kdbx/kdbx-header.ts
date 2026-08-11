@@ -1,6 +1,4 @@
-/* Docs for the KDBX header schema:
- * https://keepass.info/help/kb/kdbx_4.html#innerhdr
- */
+/* See https://keepass.info/help/kb/kdbx_4.html#innerhdr for KDBX header spec */
 
 import {
     CipherId,
@@ -120,10 +118,7 @@ export class KdbxHeader {
             versionMajor > HeaderConst.MaxSupportedVersion ||
             versionMajor < HeaderConst.MinSupportedVersion
         ) {
-            // Reject explicitly here rather than letting an unsupported version
-            // (notably KDBX3) fall through to an unimplemented downstream code
-            // path, e.g. the Salsa20 inner-stream cipher, which fails confusingly
-            // mid-decrypt instead of surfacing a clear "unsupported version" error.
+            // Reject early to avoid cryptic failures in downstream code like Salsa20
             throw new KdbxError(
                 ErrorCodes.InvalidVersion,
                 `unsupported database version ${versionMajor}.${versionMinor}; only KDBX4 is supported`

@@ -2,12 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import * as kdbxweb from '../../src';
 import { argon2 } from '../test-support/argon2';
 
-/**
- * KDBX Edge Case Tests
- *
- * Tests boundary conditions, unusual inputs, and stress scenarios
- * to ensure the library handles them gracefully.
- */
+// Tests boundary conditions, unusual inputs, and stress scenarios
 describe('KDBX Edge Cases', () => {
     beforeAll(() => {
         kdbxweb.CryptoEngine.setArgon2Impl(argon2);
@@ -59,9 +54,7 @@ describe('KDBX Edge Cases', () => {
 
             const entry2 = db2.getDefaultGroup().entries[0];
             expect(entry2.fields.get('Title')).toBe('No Password');
-            // Empty protected values may be stored as empty strings after round-trip
-            // since XML cannot distinguish between empty protected and empty plain text.
-            // Both representations are valid -- the key point is the value is empty.
+            // XML doesn't distinguish empty protected/plain; both valid as long as value is empty
             const pwd = entry2.fields.get('Password');
             if (pwd instanceof kdbxweb.ProtectedValue) {
                 expect(pwd.getText()).toBe('');
@@ -376,8 +369,7 @@ describe('KDBX Edge Cases', () => {
                 'Password',
                 kdbxweb.ProtectedValue.fromString('<script>alert("xss")</script>')
             );
-            // Note: XML normalizes \r\n to \n and strips bare \r, and \t may be
-            // normalized depending on the XML parser. Test with XML-safe whitespace only.
+            // XML normalizes \r\n→\n, strips \r, may normalize \t; use XML-safe whitespace only
             entry.fields.set('Notes', 'Line1\nLine2\nLine3\nLine4');
 
             const savedBuffer = await db.save();

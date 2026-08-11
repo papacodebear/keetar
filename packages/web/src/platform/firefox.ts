@@ -1,11 +1,4 @@
-// Firefox-specific platform shim (§9.2). MV2 persistent background page +
-// browser.* APIs (promise-based natively). Full Firefox support is Phase 11 —
-// this shim exists now only so platform/index.ts's detection has a real
-// target; it isn't exercised until packaging/testing against Firefox starts.
-//
-// Minimal ambient declaration rather than pulling in a WebExtension types
-// package before Firefox work actually begins — scoped to exactly what this
-// shim uses.
+// Firefox MV2 shim: persistent background page with promise-based browser.* APIs (§9.2).
 declare const browser: {
     storage: {
         local: {
@@ -19,6 +12,19 @@ declare const browser: {
         onStateChanged: {
             addListener(callback: (state: 'active' | 'idle' | 'locked') => void): void;
         };
+    };
+    identity: {
+        getRedirectURL(path?: string): string;
+        launchWebAuthFlow(details: { url: string; interactive?: boolean }): Promise<string>;
+    };
+    browserAction: {
+        setBadgeText(details: { tabId: number; text: string }): Promise<void>;
+    };
+    runtime: {
+        sendMessage(message: unknown): Promise<unknown>;
+    };
+    tabs: {
+        query(queryInfo: { active: boolean; currentWindow: boolean }): Promise<chrome.tabs.Tab[]>;
     };
 };
 
@@ -44,11 +50,7 @@ export const idle = {
     }
 };
 
-// No-op: Firefox MV2's background page is persistent, so there's no service
-// worker to keep alive (§9.3). Typed against chrome.alarms.* (from
-// @types/chrome, harmless to reference here even though the body never
-// touches the real chrome/browser runtime) so platform/index.ts's re-export
-// has one consistent callback shape regardless of which shim is live.
+// No-op: Firefox MV2 has persistent background (no service worker to keep alive; §9.3).
 export const alarms = {
     create(_name: string, _alarmInfo: chrome.alarms.AlarmCreateInfo): void {
         // intentionally no-op
@@ -58,6 +60,33 @@ export const alarms = {
     }
 };
 
-// No `runtime` export: message-bus.ts talks to `chrome.runtime` directly —
-// Firefox also accepts the `chrome.*` namespace for messaging (§9.1), so no
-// shim is needed there either.
+// Firefox's chrome.runtime.sendMessage returns undefined; use native browser.runtime instead.
+export const runtime = {
+    sendMessage<T>(message: unknown): Promise<T> {
+        return browser.runtime.sendMessage(message) as Promise<T>;
+    }
+};
+
+// Same promise-return gap for tabs.query; use browser.tabs instead.
+export const tabs = {
+    query(queryInfo: { active: boolean; currentWindow: boolean }): Promise<chrome.tabs.Tab[]> {
+        return browser.tabs.query(queryInfo);
+    }
+};
+
+// browser.identity.launchWebAuthFlow rejects on cancel (handled same as chrome.ts; §7.3).
+export const identity = {
+    getRedirectURL(path?: string): string {
+        return browser.identity.getRedirectURL(path);
+    },
+    async launchWebAuthFlow(options: { url: string; interactive: boolean }): Promise<string | undefined> {
+        return browser.identity.launchWebAuthFlow(options);
+    }
+};
+
+// MV2 uses browserAction; Chrome MV3 uses action (§5.1, §9.1).
+export const action = {
+    setBadgeText(details: { tabId: number; text: string }): void {
+        void browser.browserAction.setBadgeText(details);
+    }
+};

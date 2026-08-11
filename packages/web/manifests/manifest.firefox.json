@@ -1,0 +1,41 @@
+{
+  "manifest_version": 2,
+  "name": "Keetar (dev build)",
+  "version": "0.1.0",
+  "description": "A TypeScript-native KeePass-compatible browser extension. No desktop app required.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "keetar@dev.local",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  },
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": true
+  },
+  "browser_action": {
+    "default_popup": "popup/popup.html"
+  },
+  "options_page": "options/options.html",
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": ["picker-callback/picker-callback.html"],
+  "permissions": [
+    "storage",
+    "idle",
+    "alarms",
+    "clipboardWrite",
+    "tabs",
+    "identity",
+    "http://*/*",
+    "https://*/*"
+  ]
+}

@@ -197,11 +197,7 @@ export class KdbxGroup {
         }
     }
 
-    /**
-     * Merge object collection with remote collection
-     * Implements 2P-set CRDT with tombstones stored in objectMap.deleted
-     * Assumes tombstones are already merged
-     */
+    /** Merge collections using 2P-set CRDT with tombstones */
     private mergeCollection<T extends KdbxGroup | KdbxEntry>(
         collection: T[],
         remoteCollection: T[],
@@ -253,9 +249,7 @@ export class KdbxGroup {
         return newItems;
     }
 
-    /**
-     * Finds a best place to insert new item into collection
-     */
+    /** Find best insertion point by scoring nearby elements */
     private static findInsertIx<T extends KdbxGroup | KdbxEntry>(
         dst: T[],
         src: T[],

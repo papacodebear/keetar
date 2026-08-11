@@ -1,15 +1,4 @@
-// Generic AES-KW wrap/unwrap of raw key material, given VUK (vault unlock
-// key) bytes from a WebAuthn PRF assertion (§6.2). What actually gets
-// wrapped is @keetar/web's concern (KdbxCredentials.passwordHash, per §6.2's
-// note) — this module only knows about raw bytes in, raw bytes out.
-//
-// AES-KW (RFC 3394) wraps a CryptoKey, not raw bytes directly, so both sides
-// of the ceremony round-trip through an import/export: the data being
-// wrapped is imported as an (arbitrary, unused for actual encryption)
-// AES-GCM key purely so it has a concrete algorithm to wrap under, then
-// exported back to raw bytes on unwrap. The VUK itself becomes the AES-KW
-// wrapping key, imported non-extractable — it never needs to leave
-// SubtleCrypto as raw bytes again once it's done its one job.
+// AES-KW wrap/unwrap (RFC 3394): wraps key material via import/export CryptoKey ceremony with VUK.
 
 export async function wrapKeyMaterial(data: ArrayBuffer, vuk: ArrayBuffer): Promise<ArrayBuffer> {
     const wrappingKey = await importWrappingKey(vuk);

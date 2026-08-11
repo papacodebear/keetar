@@ -1,15 +1,4 @@
-/**
- * Round-trip compatibility tests.
- *
- * For each supported external KDBX4 file:
- *   1. Load the database
- *   2. Save it (re-encrypting with our implementation)
- *   3. Reload the saved output
- *   4. Verify all data is intact (entries, groups, fields, binaries)
- *
- * This ensures our save path produces files that our load path can read,
- * and that no data is lost or corrupted during the round-trip.
- */
+// Round-trip tests: load external KDBX4, save, reload, verify data integrity
 
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -103,10 +92,6 @@ describe('round-trip compatibility', () => {
         kdbxweb.CryptoEngine.setArgon2Impl(undefined as any);
     });
 
-    // ---------------------------------------------------------------
-    // KeePassXC files
-    // ---------------------------------------------------------------
-
     test('Format400.kdbx round-trip preserves all data', async () => {
         const cred = new kdbxweb.Credentials(
             kdbxweb.ProtectedValue.fromString('t')
@@ -154,13 +139,7 @@ describe('round-trip compatibility', () => {
         verifyGroupsMatch(groups1, groups2);
     }, 30000);
 
-    // ---------------------------------------------------------------
-    // pykeepass files (password-only variants for simpler cred setup)
-    // ---------------------------------------------------------------
-
-    // The uncompressed pykeepass files use Argon2d with 64MB + 18 iterations,
-    // which is slow in the WASM test module. Need a longer timeout for
-    // the round-trip (load + save + reload = 3 Argon2 invocations).
+    // pykeepass files: uncompressed use Argon2d 64MB+18 iterations (3× invocations per round-trip, need 120s timeout)
     test('test4_aes_uncompressed.kdbx round-trip', async () => {
         const cred = new kdbxweb.Credentials(
             kdbxweb.ProtectedValue.fromString('password')
@@ -238,10 +217,6 @@ describe('round-trip compatibility', () => {
         verifyEntriesMatch(entries1, collectEntries(db2));
         verifyGroupsMatch(groups1, collectGroups(db2));
     }, 30000);
-
-    // ---------------------------------------------------------------
-    // Internal test databases
-    // ---------------------------------------------------------------
 
     test('Argon2.kdbx round-trip (internal)', async () => {
         const demoKey = readFile('..', '..', 'resources', 'demo.key');

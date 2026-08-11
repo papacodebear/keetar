@@ -1,9 +1,4 @@
-/*
-    @note           Disable typescript checking for this file since we are explicity trying to check for
-                    invalid types. this became a requirement in typescript v5x
-
-    @ref            'throws error for bad value type on set'
-*/
+/* Disable TypeScript checking: intentionally testing invalid types (TypeScript v5+ requirement). */
 
 // @ts-nocheck
 

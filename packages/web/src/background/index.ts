@@ -1,9 +1,16 @@
-import { ByteUtils, preloadPasswordStrength } from '@keetar/core';
+import {
+    ByteUtils,
+    parseBitwardenJson,
+    parseCsv,
+    parseOnePux,
+    parseProtonPassJson,
+    preloadPasswordStrength
+} from '@keetar/core';
 import { installArgon2 } from './argon2-wasm';
 import { vaultSession } from './vault-session';
 import { registerMessageHandler, type KeetarResponse } from './message-bus';
 import { startKeepalive } from './keepalive';
-import { idle } from '../platform';
+import { action, idle } from '../platform';
 import { matchEntries } from '../autofill/matcher';
 
 // Entry point — registers listeners, initialises session (§2.4).
@@ -56,16 +63,12 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
                 report: await vaultSession.getPasswordHealth()
             };
         case 'LOGIN_FORM_DETECTED': {
-            // Background, not the content script, decides whether/what to
-            // autofill (§5.1) — this just updates the toolbar badge with the
-            // match count for the tab that sent it. Nothing to show if the
-            // vault is locked (no entries to match against) or the tab's URL
-            // isn't visible to us.
+            // Update toolbar badge with match count (background decides autofill logic).
             const tabId = sender.tab?.id;
             const tabUrl = sender.tab?.url;
             if (tabId !== undefined && tabUrl && vaultSession.status === 'unlocked') {
                 const matches = matchEntries(vaultSession.listEntries(), tabUrl);
-                void chrome.action.setBadgeText({
+                action.setBadgeText({
                     tabId,
                     text: matches.length > 0 ? String(matches.length) : ''
                 });
@@ -121,12 +124,53 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
                 type: 'GET_ATTACHMENT',
                 dataBase64: vaultSession.getAttachmentBase64(request.entryUuid, request.name)
             };
+        case 'GET_ENTRY_CUSTOM_ICON':
+            return {
+                ok: true,
+                type: 'GET_ENTRY_CUSTOM_ICON',
+                dataBase64: vaultSession.getEntryCustomIconBase64(request.entryUuid)
+            };
+        case 'FETCH_FAVICON_ICON':
+            await vaultSession.setCustomIconFromFavicon(request.entryUuid);
+            return { ok: true, type: 'FETCH_FAVICON_ICON' };
+        case 'FETCH_MISSING_FAVICONS': {
+            const { updated, failed, skipped } = await vaultSession.fetchMissingFavicons();
+            return { ok: true, type: 'FETCH_MISSING_FAVICONS', updated, failed, skipped };
+        }
+        case 'IMPORT_ENTRIES': {
+            const bytes = ByteUtils.base64ToBytes(request.dataBase64);
+            const records =
+                request.format === 'onepassword'
+                    ? parseOnePux(bytes)
+                    : request.format === 'bitwarden'
+                      ? parseBitwardenJson(ByteUtils.bytesToString(bytes))
+                      : request.format === 'protonpass'
+                        ? parseProtonPassJson(ByteUtils.bytesToString(bytes))
+                        : parseCsv(ByteUtils.bytesToString(bytes));
+            const { imported } = await vaultSession.importEntries(request.groupUuid, records);
+            return { ok: true, type: 'IMPORT_ENTRIES', imported };
+        }
+        case 'EXPORT_VAULT':
+            return { ok: true, type: 'EXPORT_VAULT', data: vaultSession.exportVault(request.format) };
+        case 'OPEN_SECONDARY_VAULT': {
+            const data = ByteUtils.arrayToBuffer(ByteUtils.base64ToBytes(request.dataBase64));
+            const summary = await vaultSession.openSecondaryVault(data, request.password);
+            return { ok: true, type: 'OPEN_SECONDARY_VAULT', summary };
+        }
+        case 'CLOSE_SECONDARY_VAULT':
+            vaultSession.closeSecondaryVault();
+            return { ok: true, type: 'CLOSE_SECONDARY_VAULT' };
+        case 'PREVIEW_COMBINE': {
+            const { conflicts, nonConflictingCount, identicalCount } = vaultSession.previewCombine();
+            return { ok: true, type: 'PREVIEW_COMBINE', conflicts, nonConflictingCount, identicalCount };
+        }
+        case 'APPLY_COMBINE': {
+            const { imported, merged, replaced } = await vaultSession.applyCombine(request.groupUuid, request.resolutions);
+            return { ok: true, type: 'APPLY_COMBINE', imported, merged, replaced };
+        }
     }
 });
 
-// Development console access (chrome://extensions → service worker →
-// Inspect), matching the "browser console" allowance used since Phase 2 —
-// handy for exercising the write path without going through the UI.
-//   await __keetarDebug.vaultSession.createGroup(rootUuid, 'Test')
+// Dev console access for testing (e.g. __keetarDebug.vaultSession.createGroup).
 declare const self: { __keetarDebug?: unknown } & typeof globalThis;
 self.__keetarDebug = { vaultSession };

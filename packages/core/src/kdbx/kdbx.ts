@@ -43,9 +43,7 @@ export class Kdbx {
         return this.header.versionMinor;
     }
 
-    /**
-     * Creates a new database
-     */
+    /** Creates a new database */
     static create(credentials: KdbxCredentials, name: string): Kdbx {
         if (!(credentials instanceof KdbxCredentials)) {
             throw new KdbxError(ErrorCodes.InvalidArg, 'credentials');
@@ -62,10 +60,7 @@ export class Kdbx {
         return kdbx;
     }
 
-    /**
-     * Load a kdbx file
-     * If there was an error loading file, throws an exception
-     */
+    /** Load a kdbx file; throws on error */
     static load(
         data: ArrayBuffer,
         credentials: KdbxCredentials,
@@ -84,10 +79,7 @@ export class Kdbx {
         return format.load(data);
     }
 
-    /**
-     * Import database from an xml file
-     * If there was an error loading file, throws an exception
-     */
+    /** Import database from XML; throws on error */
     static loadXml(data: string, credentials: KdbxCredentials): Promise<Kdbx> {
         if (typeof data !== 'string') {
             return Promise.reject(new KdbxError(ErrorCodes.InvalidArg, 'data'));
@@ -101,25 +93,19 @@ export class Kdbx {
         return format.loadXml(data);
     }
 
-    /**
-     * Save the db to ArrayBuffer
-     */
+    /** Save the db to ArrayBuffer */
     save(): Promise<ArrayBuffer> {
         const format = new KdbxFormat(this);
         return format.save();
     }
 
-    /**
-     * Save the db as XML string
-     */
+    /** Save the db as XML string */
     saveXml(prettyPrint = false): Promise<string> {
         const format = new KdbxFormat(this);
         return format.saveXml(prettyPrint);
     }
 
-    /**
-     * Creates a default group, if it's not yet created
-     */
+    /** Creates a default group if needed */
     createDefaultGroup(): void {
         if (this.groups.length) {
             return;
@@ -130,9 +116,7 @@ export class Kdbx {
         this.groups.push(defaultGroup);
     }
 
-    /**
-     * Creates a recycle bin group, if it's not yet created
-     */
+    /** Creates a recycle bin group if needed */
     createRecycleBin(): void {
         this.meta.recycleBinEnabled = true;
         if (this.meta.recycleBinUuid && this.getGroup(this.meta.recycleBinUuid)) {
@@ -147,27 +131,21 @@ export class Kdbx {
         defGrp.groups.push(recycleBin);
     }
 
-    /**
-     * Adds a new group to an existing group
-     */
+    /** Adds a new group to an existing group */
     createGroup(group: KdbxGroup, name: string): KdbxGroup {
         const subGroup = KdbxGroup.create(name, group);
         group.groups.push(subGroup);
         return subGroup;
     }
 
-    /**
-     * Adds a new entry to a group
-     */
+    /** Adds a new entry to a group */
     createEntry(group: KdbxGroup): KdbxEntry {
         const entry = KdbxEntry.create(this.meta, group);
         group.entries.push(entry);
         return entry;
     }
 
-    /**
-     * Gets the default group
-     */
+    /** Gets the default group */
     getDefaultGroup(): KdbxGroup {
         if (!this.groups[0]) {
             throw new KdbxError(ErrorCodes.InvalidState, 'empty default group');
@@ -175,9 +153,7 @@ export class Kdbx {
         return this.groups[0];
     }
 
-    /**
-     * Get a group by uuid, returns undefined if it's not found
-     */
+    /** Get a group by uuid, returns undefined if not found */
     getGroup(uuid: KdbxUuid | string, parentGroup?: KdbxGroup): KdbxGroup | undefined {
         const groups = parentGroup ? parentGroup.groups : this.groups;
         for (const group of groups) {
@@ -191,12 +167,7 @@ export class Kdbx {
         }
     }
 
-    /**
-     * Move an object from one group to another
-     * @param object - object to be moved
-     * @param toGroup - target parent group
-     * @param atIndex - index in target group (by default, insert to the end of the group)
-     */
+    /** Move object between groups or delete if toGroup is null */
     move<T extends KdbxEntry | KdbxGroup>(
         object: T,
         toGroup: KdbxGroup | undefined | null,
@@ -234,11 +205,7 @@ export class Kdbx {
         object.times.locationChanged = new Date();
     }
 
-    /**
-     * Adds a so-called deleted object, this is used to keep track of objects during merging
-     * @param uuid - object uuid
-     * @param dt - deletion date
-     */
+    /** Track deleted objects for merge reconciliation */
     addDeletedObject(uuid: KdbxUuid, dt: Date): void {
         const deletedObject = new KdbxDeletedObject();
         deletedObject.uuid = uuid;
@@ -246,10 +213,7 @@ export class Kdbx {
         this.deletedObjects.push(deletedObject);
     }
 
-    /**
-     * Delete an entry or a group
-     * Depending on settings, removes either to trash, or completely
-     */
+    /** Delete to trash (if enabled) or permanently */
     remove<T extends KdbxEntry | KdbxGroup>(object: T): void {
         let toGroup = undefined;
         if (this.meta.recycleBinEnabled && this.meta.recycleBinUuid) {
@@ -259,21 +223,12 @@ export class Kdbx {
         this.move(object, toGroup);
     }
 
-    /**
-     * Creates a binary in the db and returns an object that can be put to entry.binaries
-     */
+    /** Creates a binary and returns object for entry.binaries */
     createBinary(value: KdbxBinary): Promise<KdbxBinaryWithHash> {
         return this.binaries.add(value);
     }
 
-    /**
-     * Import an entry from another file
-     * It's up to caller to decide what should happen to the original entry in the source file
-     * Returns the new entry
-     * @param entry - entry to be imported
-     * @param group - target parent group
-     * @param file - the source file containing the group
-     */
+    /** Import entry with binaries and custom icons from another file */
     importEntry(entry: KdbxEntry, group: KdbxGroup, file: Kdbx): KdbxEntry {
         const newEntry = new KdbxEntry();
         const uuid = KdbxUuid.random();
@@ -323,12 +278,7 @@ export class Kdbx {
         return newEntry;
     }
 
-    /**
-     * Perform database cleanup
-     * @param settings.historyRules - remove extra history, it it doesn't match defined rules, e.g. records number
-     * @param settings.customIcons - remove unused custom icons
-     * @param settings.binaries - remove unused binaries
-     */
+    /** Remove excess history, unused icons and binaries based on settings */
     cleanup(settings?: {
         historyRules?: boolean;
         customIcons?: boolean;
@@ -391,16 +341,7 @@ export class Kdbx {
         }
     }
 
-    /**
-     * Merge the db with another db
-     * Some parts of the remote DB are copied by reference, so it should NOT be modified after merge
-     * Suggested use case:
-     * - open the local db
-     * - get a remote db somehow and open in
-     * - merge the remote db into the local db: local.merge(remote)
-     * - close the remote db
-     * @param remote - database to merge in
-     */
+    /** Merge another database in; remote DB must not be modified after merge */
     merge(remote: Kdbx): void {
         const root = this.getDefaultGroup();
         const remoteRoot = remote.getDefaultGroup();
@@ -435,12 +376,7 @@ export class Kdbx {
         this.cleanup({ historyRules: true, customIcons: true, binaries: true });
     }
 
-    /**
-     * Gets editing state tombstones (for successful merge)
-     * The replica must save this state with the db, assign in on opening the db,
-     * and call removeLocalEditState on successful upstream push.
-     * This state is JSON serializable.
-     */
+    /** Get edit state for merge tracking; must be saved and restored on open */
     getLocalEditState(): KdbxEditState {
         const editingState: KdbxEditState = {
             entries: {}
@@ -456,11 +392,7 @@ export class Kdbx {
         return editingState;
     }
 
-    /**
-     * Sets editing state tombstones returned previously by getLocalEditState
-     * The replica must call this method on opening the db to the state returned previously on getLocalEditState.
-     * @param editingState - result of getLocalEditState invoked before on saving the db
-     */
+    /** Restore edit state from getLocalEditState on database open */
     setLocalEditState(editingState: KdbxEditState): void {
         for (const entry of this.getDefaultGroup().allEntries()) {
             if (editingState.entries?.[entry.uuid.id]) {
@@ -472,12 +404,7 @@ export class Kdbx {
         }
     }
 
-    /**
-     * Removes editing state tombstones
-     * Immediately after successful upstream push the replica must:
-     * - call this method
-     * - discard any previous state obtained by getLocalEditState call before
-     */
+    /** Clear edit state after successful upstream push */
     removeLocalEditState(): void {
         for (const entry of this.getDefaultGroup().allEntries()) {
             entry._editState = undefined;
@@ -485,26 +412,19 @@ export class Kdbx {
         this.meta._editState = undefined;
     }
 
-    /**
-     * Upgrade the file to latest version
-     */
+    /** Upgrade the file to latest version */
     upgrade(): void {
         this.setVersion(KdbxHeader.MaxFileVersion);
     }
 
-    /**
-     * Set the file version to a specified number
-     */
+    /** Set the file version to a specified number */
     setVersion(version: 3 | 4): void {
         this.meta.headerHash = undefined;
         this.meta.settingsChanged = new Date();
         this.header.setVersion(version);
     }
 
-    /**
-     * Set file key derivation function
-     * @param kdf - KDF id, from KdfId
-     */
+    /** Set file key derivation function */
     setKdf(kdf: string): void {
         this.meta.headerHash = undefined;
         this.meta.settingsChanged = new Date();

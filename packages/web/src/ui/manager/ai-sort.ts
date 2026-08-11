@@ -5,14 +5,38 @@ export interface AiSortAssignment {
     group: string;
 }
 
+export interface AiSortExport {
+    text: string;
+    includedCount: number;
+    skippedCount: number;
+}
+
 // Title/URL/current-group only — passwords and usernames never enter this file (§8.2).
-export function buildAiSortExport(root: GroupNode, recycleBinGroupUuid: string | undefined): string {
+// alreadySortedUuids lets a re-run only export what's new, since entries the AI already
+// categorized don't need to be shown to it again. allowConsolidation only adds language
+// inviting the AI to restructure existing groups — appropriate for a full re-sort, not
+// for a routine "just place the new ones" pass.
+export function buildAiSortExport(
+    root: GroupNode,
+    recycleBinGroupUuid: string | undefined,
+    alreadySortedUuids: ReadonlySet<string>,
+    allowConsolidation: boolean
+): AiSortExport {
     const entries: { id: string; title: string; url: string; group: string }[] = [];
+    const groupNames: string[] = [];
+    let skippedCount = 0;
     const walk = (group: GroupNode) => {
         if (group.uuid === recycleBinGroupUuid) {
             return;
         }
+        if (group.name) {
+            groupNames.push(group.name);
+        }
         for (const entry of group.entries) {
+            if (alreadySortedUuids.has(entry.uuid)) {
+                skippedCount++;
+                continue;
+            }
             entries.push({ id: entry.uuid, title: entry.title, url: entry.urls[0] ?? '', group: group.name });
         }
         for (const subGroup of group.groups) {
@@ -24,11 +48,19 @@ export function buildAiSortExport(root: GroupNode, recycleBinGroupUuid: string |
     const instructions =
         'Group these password-manager entries into logical categories based on their title/URL ' +
         '(e.g. Banking, Shopping, Work, Social, Email, Dev Tools, Utilities). Reuse an existing ' +
-        '"group" value where it already fits, or invent a short new one otherwise. Respond with ' +
-        'ONLY a JSON array, no other text, in exactly this shape:\n' +
+        '"group" value where it already fits, or invent a short new one otherwise.' +
+        (allowConsolidation
+            ? ' Feel free to consolidate, rename, or merge existing groups where it improves organization.'
+            : '') +
+        ' Respond with ONLY a JSON array, no other text, in exactly this shape:\n' +
         '[{"id": "<id>", "group": "<group name>"}]\n\n' +
+        `Existing groups: ${groupNames.length > 0 ? groupNames.join(', ') : '(none yet)'}\n\n` +
         'Entries:';
-    return `${instructions}\n${JSON.stringify(entries, null, 2)}`;
+    return {
+        text: `${instructions}\n${JSON.stringify(entries, null, 2)}`,
+        includedCount: entries.length,
+        skippedCount
+    };
 }
 
 // Tolerant of a chat UI wrapping the JSON in prose or a code fence.
@@ -63,6 +95,8 @@ export interface AiSortDiff {
     groups: AiSortDiffGroup[];
     unknownCount: number;
     unchangedCount: number;
+    /** Every id the AI actually addressed (changed or not) — marked "sorted" once applied, unknown ids excluded. */
+    consideredEntryUuids: string[];
 }
 
 // Diffs against the tree already in memory (Manager already holds the full GET_GROUP_TREE result) — no backend call needed for a preview.
@@ -90,6 +124,7 @@ export function diffAiSortAssignments(
     const byGroup = new Map<string, AiSortDiffGroup>();
     let unknownCount = 0;
     let unchangedCount = 0;
+    const consideredEntryUuids: string[] = [];
 
     for (const { id, group: proposedGroup } of assignments) {
         const info = entryInfo.get(id);
@@ -97,6 +132,7 @@ export function diffAiSortAssignments(
             unknownCount++;
             continue;
         }
+        consideredEntryUuids.push(id);
         if (info.currentGroupName.toLowerCase() === proposedGroup.toLowerCase()) {
             unchangedCount++;
             continue;
@@ -110,5 +146,5 @@ export function diffAiSortAssignments(
         bucket.entries.push({ entryUuid: id, title: info.title });
     }
 
-    return { groups: Array.from(byGroup.values()), unknownCount, unchangedCount };
+    return { groups: Array.from(byGroup.values()), unknownCount, unchangedCount, consideredEntryUuids };
 }

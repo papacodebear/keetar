@@ -2,7 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { ByteUtils } from '@keetar/core';
 import { sendToBackground } from '../../background/message-bus';
 import type { EntryFieldName, EntrySummary } from '../../background/vault-session';
-import { clearConfiguredVault, getConfiguredVault, setConfiguredVault, type VaultBackend } from '../../config/vault-config';
+import {
+    clearConfiguredVault,
+    getConfiguredVault,
+    setConfiguredVault,
+    setPendingOpenVaultFlow,
+    type VaultBackend
+} from '../../config/vault-config';
 import type { FillCredentialsMessage } from '../../autofill/messages';
 import { isBiometricEnrolled, unlockToPasswordHash } from '../../auth/biometric';
 import { isWebAuthnSupported } from '../../auth/webauthn';
@@ -219,11 +225,13 @@ function VaultStatusHeader({
     vaultName,
     vaultProvider,
     matchCount,
+    onLock,
     onDisconnect
 }: {
     vaultName: string;
     vaultProvider: VaultBackend;
     matchCount?: number;
+    onLock?: () => Promise<void>;
     onDisconnect: () => Promise<void>;
 }) {
     return (
@@ -235,6 +243,17 @@ function VaultStatusHeader({
                 <span className="vault-status-matches">
                     {matchCount} {matchCount === 1 ? 'match' : 'matches'} on this page
                 </span>
+            )}
+            {onLock && (
+                <button
+                    type="button"
+                    className="lock-button"
+                    title="Lock database"
+                    aria-label="Lock database"
+                    onClick={() => void onLock()}
+                >
+                    🔒
+                </button>
             )}
             <button
                 type="button"
@@ -326,13 +345,20 @@ function OpenVaultFlow({ onOpened, onCancel }: { onOpened: () => Promise<void>; 
         }
     }
 
+    // Drive setup needs Options' OAuth flow — hand off with the flow pre-selected, not dropped at Options' idle screen.
+    async function openViaOptions(): Promise<void> {
+        await setPendingOpenVaultFlow();
+        chrome.runtime.openOptionsPage();
+        window.close();
+    }
+
     return (
         <div className="panel-box">
             <p className="hint">Where is the database file?</p>
             <button type="button" onClick={() => void openLocal()} disabled={busy}>
                 This computer
             </button>{' '}
-            <button type="button" onClick={() => void chrome.runtime.openOptionsPage()} disabled={busy}>
+            <button type="button" onClick={() => void openViaOptions()} disabled={busy}>
                 Google Drive…
             </button>{' '}
             <button type="button" onClick={onCancel} disabled={busy}>
@@ -600,6 +626,7 @@ function UnlockedView({
                 vaultName={vaultName}
                 vaultProvider={vaultProvider}
                 matchCount={matchedUuids.size}
+                onLock={onLock}
                 onDisconnect={onDisconnect}
             />
             <div className="toolbar">
@@ -611,9 +638,6 @@ function UnlockedView({
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />
-                <button type="button" onClick={() => void onLock()}>
-                    Lock
-                </button>
             </div>
             <button type="button" className="view-all-button" onClick={openManager}>
                 View all entries &amp; groups

@@ -49,17 +49,41 @@ describe('buildAiSortExport', () => {
     }
 
     test('includes entries from every non-recycle-bin group, with id/title/url/group', () => {
-        const json = entriesJson(buildAiSortExport(root, 'recycle-bin'));
-        expect(json).toEqual([
+        const { text, includedCount, skippedCount } = buildAiSortExport(root, 'recycle-bin', new Set(), false);
+        expect(entriesJson(text)).toEqual([
             { id: 'e1', title: 'GitHub', url: 'https://github.com', group: 'Root' },
             { id: 'e2', title: 'Jira', url: 'https://jira.example.com', group: 'Work' }
         ]);
+        expect(includedCount).toBe(2);
+        expect(skippedCount).toBe(0);
     });
 
     test('never includes username or password fields', () => {
-        const json = entriesJson(buildAiSortExport(root, 'recycle-bin'));
+        const { text } = buildAiSortExport(root, 'recycle-bin', new Set(), false);
+        const json = entriesJson(text);
         expect(JSON.stringify(json)).not.toContain('username');
         expect(JSON.stringify(json)).not.toContain('password');
+    });
+
+    test('omits already-sorted entries and reports how many were skipped', () => {
+        const { text, includedCount, skippedCount } = buildAiSortExport(root, 'recycle-bin', new Set(['e1']), false);
+        expect(entriesJson(text)).toEqual([
+            { id: 'e2', title: 'Jira', url: 'https://jira.example.com', group: 'Work' }
+        ]);
+        expect(includedCount).toBe(1);
+        expect(skippedCount).toBe(1);
+    });
+
+    test('always lists existing groups, even ones with no entries in this export batch', () => {
+        const { text } = buildAiSortExport(root, 'recycle-bin', new Set(['e1', 'e2']), false);
+        expect(text).toContain('Existing groups: Root, Work');
+    });
+
+    test('only mentions consolidating groups when allowConsolidation is true', () => {
+        const withoutConsolidation = buildAiSortExport(root, 'recycle-bin', new Set(), false).text;
+        const withConsolidation = buildAiSortExport(root, 'recycle-bin', new Set(), true).text;
+        expect(withoutConsolidation).not.toContain('consolidate');
+        expect(withConsolidation).toContain('consolidate');
     });
 });
 
@@ -112,5 +136,14 @@ describe('diffAiSortAssignments', () => {
         const diff = diffAiSortAssignments(root, 'recycle-bin', [{ id: 'e3', group: 'Work' }]);
         expect(diff.groups).toEqual([]);
         expect(diff.unknownCount).toBe(1);
+    });
+
+    test('consideredEntryUuids includes both changed and no-op ids, but not unknown ones', () => {
+        const diff = diffAiSortAssignments(root, 'recycle-bin', [
+            { id: 'e1', group: 'Dev Tools' },
+            { id: 'e2', group: 'Work' },
+            { id: 'does-not-exist', group: 'Work' }
+        ]);
+        expect(diff.consideredEntryUuids.sort()).toEqual(['e1', 'e2']);
     });
 });

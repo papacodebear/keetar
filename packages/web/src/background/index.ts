@@ -120,6 +120,10 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
         case 'DELETE_GROUP':
             await vaultSession.deleteGroup(request.groupUuid);
             return { ok: true, type: 'DELETE_GROUP' };
+        case 'EMPTY_RECYCLE_BIN': {
+            const result = await vaultSession.emptyRecycleBin();
+            return { ok: true, type: 'EMPTY_RECYCLE_BIN', ...result };
+        }
         case 'ADD_ATTACHMENT':
             await vaultSession.addAttachment(request.entryUuid, request.name, request.dataBase64);
             return { ok: true, type: 'ADD_ATTACHMENT' };

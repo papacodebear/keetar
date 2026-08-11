@@ -21,6 +21,7 @@
         overflow-y: auto;
         padding: 0.5rem;
       }
+      .tree-pane-toolbar { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-bottom: 0.5rem; }
       .tree-pane-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
       .icon-button { padding: 0.3rem 0.45rem; font-size: 15px; line-height: 1; margin-right: 0; }
       .tree-node { user-select: none; }
@@ -39,6 +40,7 @@
       .tree-node-actions { display: none; gap: 0.15rem; }
       .tree-node-label:hover .tree-node-actions { display: flex; }
       .tree-children { margin-left: 1rem; }
+      .tree-separator { border: none; border-top: 1px solid rgba(127, 127, 127, 0.3); margin: 0.4rem 0.4rem 0.4rem 0; }
       .middle-pane {
         width: 280px;
         flex-shrink: 0;
@@ -48,6 +50,7 @@
         flex-direction: column;
       }
       .middle-pane-header { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; border-bottom: 1px solid #eee; }
+      .entry-search { display: block; width: 100%; box-sizing: border-box; margin: 0.5rem; padding: 0.4rem; font-size: 13px; }
       .entry-row {
         display: flex;
         flex-direction: row;

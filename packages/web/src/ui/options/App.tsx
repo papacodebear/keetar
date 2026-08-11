@@ -3,6 +3,7 @@ import { ByteUtils } from '@keetar/core';
 import { createVaultFile, pickVaultFile } from '../../providers/local-file';
 import {
     clearConfiguredVault,
+    consumePendingOpenVaultFlow,
     getConfiguredVault,
     setConfiguredVault,
     type ConfiguredVault,
@@ -46,6 +47,9 @@ export function App() {
         setVault(configured);
         setEnrolled(configured ? await isBiometricEnrolled(configured.uuid) : false);
         setGdriveConnected(await isGoogleDriveConnected());
+        if (!configured && (await consumePendingOpenVaultFlow())) {
+            setMode('open');
+        }
         setLoaded(true);
     }
 

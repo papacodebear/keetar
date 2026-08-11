@@ -1,7 +1,9 @@
+import { ByteUtils } from '@keetar/core';
 import type { FileListing, FileMetadata, FileProvider } from '@keetar/core';
 import { CloudConflictError } from './gdrive';
+import { getKvStore } from '../storage/opfs-kv-store';
 
-// §4.3's sync algorithm with OPFS cache + metadata; enables offline access and cross-session conflict detection.
+// §4.3's sync algorithm with a local cache + metadata; enables offline access and cross-session conflict detection.
 
 export interface CacheMeta {
     provider: string;
@@ -21,60 +23,30 @@ function metaFileName(uuid: string): string {
 }
 
 async function readCacheBlob(uuid: string): Promise<ArrayBuffer | undefined> {
-    const root = await navigator.storage.getDirectory();
-    try {
-        const handle = await root.getFileHandle(blobFileName(uuid));
-        const file = await handle.getFile();
-        return await file.arrayBuffer();
-    } catch (e) {
-        if (e instanceof DOMException && e.name === 'NotFoundError') {
-            return undefined;
-        }
-        throw e;
-    }
+    const store = await getKvStore();
+    return store.read(blobFileName(uuid));
 }
 
 async function writeCacheBlob(uuid: string, data: ArrayBuffer): Promise<void> {
-    const root = await navigator.storage.getDirectory();
-    const handle = await root.getFileHandle(blobFileName(uuid), { create: true });
-    const writable = await handle.createWritable();
-    await writable.write(data);
-    await writable.close();
+    const store = await getKvStore();
+    await store.write(blobFileName(uuid), data);
 }
 
 export async function readCacheMeta(uuid: string): Promise<CacheMeta | undefined> {
-    const root = await navigator.storage.getDirectory();
-    try {
-        const handle = await root.getFileHandle(metaFileName(uuid));
-        const file = await handle.getFile();
-        return JSON.parse(await file.text()) as CacheMeta;
-    } catch (e) {
-        if (e instanceof DOMException && e.name === 'NotFoundError') {
-            return undefined;
-        }
-        throw e;
-    }
+    const store = await getKvStore();
+    const data = await store.read(metaFileName(uuid));
+    return data ? (JSON.parse(ByteUtils.bytesToString(data)) as CacheMeta) : undefined;
 }
 
 async function writeCacheMeta(uuid: string, meta: CacheMeta): Promise<void> {
-    const root = await navigator.storage.getDirectory();
-    const handle = await root.getFileHandle(metaFileName(uuid), { create: true });
-    const writable = await handle.createWritable();
-    await writable.write(JSON.stringify(meta));
-    await writable.close();
+    const store = await getKvStore();
+    await store.write(metaFileName(uuid), ByteUtils.arrayToBuffer(ByteUtils.stringToBytes(JSON.stringify(meta))));
 }
 
 export async function removeCache(uuid: string): Promise<void> {
-    const root = await navigator.storage.getDirectory();
-    for (const name of [blobFileName(uuid), metaFileName(uuid)]) {
-        try {
-            await root.removeEntry(name);
-        } catch (e) {
-            if (!(e instanceof DOMException && e.name === 'NotFoundError')) {
-                throw e;
-            }
-        }
-    }
+    const store = await getKvStore();
+    await store.remove(blobFileName(uuid));
+    await store.remove(metaFileName(uuid));
 }
 
 /** Thrown when both the cloud copy and this device's cache changed since they last agreed — §4.3 step 3c: never silently overwrite either. */

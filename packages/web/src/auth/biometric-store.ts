@@ -1,6 +1,7 @@
 import { ByteUtils } from '@keetar/core';
+import { getKvStore } from '../storage/opfs-kv-store';
 
-// OPFS biometric record per vault: credentialId, prfSalt, wrapped hash always together (§4.1, §6.2).
+// Biometric record per vault: credentialId, prfSalt, wrapped hash always together (§4.1, §6.2).
 
 export interface BiometricRecord {
     credentialIdBase64: string;
@@ -14,36 +15,19 @@ function fileName(vaultUuid: string): string {
 }
 
 export async function saveBiometricRecord(vaultUuid: string, record: BiometricRecord): Promise<void> {
-    const root = await navigator.storage.getDirectory();
-    const handle = await root.getFileHandle(fileName(vaultUuid), { create: true });
-    const writable = await handle.createWritable();
-    await writable.write(JSON.stringify(record));
-    await writable.close();
+    const store = await getKvStore();
+    await store.write(fileName(vaultUuid), ByteUtils.arrayToBuffer(ByteUtils.stringToBytes(JSON.stringify(record))));
 }
 
 export async function getBiometricRecord(vaultUuid: string): Promise<BiometricRecord | undefined> {
-    const root = await navigator.storage.getDirectory();
-    try {
-        const handle = await root.getFileHandle(fileName(vaultUuid));
-        const file = await handle.getFile();
-        return JSON.parse(await file.text()) as BiometricRecord;
-    } catch (e) {
-        if (e instanceof DOMException && e.name === 'NotFoundError') {
-            return undefined;
-        }
-        throw e;
-    }
+    const store = await getKvStore();
+    const data = await store.read(fileName(vaultUuid));
+    return data ? (JSON.parse(ByteUtils.bytesToString(data)) as BiometricRecord) : undefined;
 }
 
 export async function removeBiometricRecord(vaultUuid: string): Promise<void> {
-    const root = await navigator.storage.getDirectory();
-    try {
-        await root.removeEntry(fileName(vaultUuid));
-    } catch (e) {
-        if (!(e instanceof DOMException && e.name === 'NotFoundError')) {
-            throw e;
-        }
-    }
+    const store = await getKvStore();
+    await store.remove(fileName(vaultUuid));
 }
 
 export function bufferToBase64(buffer: ArrayBuffer): string {

@@ -392,6 +392,28 @@ class VaultSession {
         await this.persist();
     }
 
+    // db.remove() always redirects into the recycle bin — permanently delete its contents with move(x, null) instead.
+    async emptyRecycleBin(): Promise<{ deletedEntries: number; deletedGroups: number }> {
+        const db = this.requireUnlocked();
+        const recycleBinUuid = db.meta.recycleBinUuid;
+        const recycleBin = recycleBinUuid ? db.getGroup(recycleBinUuid) : undefined;
+        if (!recycleBin) {
+            return { deletedEntries: 0, deletedGroups: 0 };
+        }
+        const deletedEntries = Array.from(recycleBin.allEntries()).length;
+        const deletedGroups = Array.from(recycleBin.allGroups()).length - 1;
+
+        // Snapshot first — move() splices these same arrays as it goes.
+        for (const entry of [...recycleBin.entries]) {
+            db.move(entry, null);
+        }
+        for (const group of [...recycleBin.groups]) {
+            db.move(group, null);
+        }
+        await this.persist();
+        return { deletedEntries, deletedGroups };
+    }
+
     // Import (§9): resolve group paths, creating folders as needed to avoid duplication.
     async importEntries(groupUuid: string, records: VaultEntryRecord[]): Promise<{ imported: number }> {
         const db = this.requireUnlocked();

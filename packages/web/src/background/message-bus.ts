@@ -40,6 +40,7 @@ export type KeetarRequest =
     | { type: 'CREATE_GROUP'; parentGroupUuid: string; name: string }
     | { type: 'RENAME_GROUP'; groupUuid: string; name: string }
     | { type: 'DELETE_GROUP'; groupUuid: string }
+    | { type: 'EMPTY_RECYCLE_BIN' }
     | { type: 'ADD_ATTACHMENT'; entryUuid: string; name: string; dataBase64: string }
     | { type: 'REMOVE_ATTACHMENT'; entryUuid: string; name: string }
     | { type: 'GET_ATTACHMENT'; entryUuid: string; name: string }
@@ -82,6 +83,7 @@ export type KeetarResponse =
     | { ok: true; type: 'CREATE_GROUP'; group: GroupSummary }
     | { ok: true; type: 'RENAME_GROUP' }
     | { ok: true; type: 'DELETE_GROUP' }
+    | { ok: true; type: 'EMPTY_RECYCLE_BIN'; deletedEntries: number; deletedGroups: number }
     | { ok: true; type: 'ADD_ATTACHMENT' }
     | { ok: true; type: 'REMOVE_ATTACHMENT' }
     | { ok: true; type: 'GET_ATTACHMENT'; dataBase64: string }

@@ -3,13 +3,16 @@ import { ByteUtils, estimatePasswordEntropy } from '@keetar/core';
 import { sendToBackground } from '../../background/message-bus';
 import { EntryIcon } from '../shared/EntryIcon';
 import { buildAiSortExport, diffAiSortAssignments, parseAiSortResponse } from './ai-sort';
+import { getSortedEntryUuids, markEntriesSorted } from './ai-sort-tracker';
 import { connectGoogleDrive, getAccessToken, GoogleDriveProvider } from '../../providers/gdrive';
 import { showDrivePicker } from '../../providers/gdrive-picker';
+import { clearConfiguredVault, getConfiguredVault } from '../../config/vault-config';
 import type { AiSortDiff } from './ai-sort';
 import type {
     CombineConflict,
     CombineResolution,
     EntryDetail,
+    EntrySummary,
     GroupNode,
     PasswordHealthReport
 } from '../../background/vault-session';
@@ -28,10 +31,12 @@ async function ensureGoogleDriveAuthorized(): Promise<void> {
 type AppState =
     | { kind: 'loading' }
     | { kind: 'locked' }
+    | { kind: 'disconnected' }
     | {
           kind: 'ready';
           root: GroupNode;
           recycleBinGroupUuid: string | undefined;
+          vaultUuid: string | undefined;
           selectedGroupUuid: string;
           selectedEntryUuid?: string;
       };
@@ -43,10 +48,16 @@ export function App() {
         void init();
     }, []);
 
+    // Distinguishes "locked, unlock from the popup" from "nothing configured at all" (e.g. after Disconnect).
+    async function notReadyState(): Promise<AppState> {
+        const configured = await getConfiguredVault();
+        return configured ? { kind: 'locked' } : { kind: 'disconnected' };
+    }
+
     async function init(): Promise<void> {
         const status = await sendToBackground({ type: 'GET_STATUS' });
         if (!status.ok || status.type !== 'GET_STATUS' || status.status !== 'unlocked') {
-            setState({ kind: 'locked' });
+            setState(await notReadyState());
             return;
         }
         await reloadTree();
@@ -55,13 +66,15 @@ export function App() {
     async function reloadTree(keepSelection?: { groupUuid: string; entryUuid?: string }): Promise<void> {
         const response = await sendToBackground({ type: 'GET_GROUP_TREE' });
         if (!response.ok || response.type !== 'GET_GROUP_TREE') {
-            setState({ kind: 'locked' });
+            setState(await notReadyState());
             return;
         }
+        const configured = await getConfiguredVault();
         setState({
             kind: 'ready',
             root: response.root,
             recycleBinGroupUuid: response.recycleBinGroupUuid,
+            vaultUuid: configured?.uuid,
             selectedGroupUuid: keepSelection?.groupUuid ?? response.root.uuid,
             selectedEntryUuid: keepSelection?.entryUuid
         });
@@ -78,11 +91,20 @@ export function App() {
             </div>
         );
     }
+    if (state.kind === 'disconnected') {
+        return (
+            <div className="empty-state">
+                <p>No database connected.</p>
+                <p>Open or create one from the extension's popup or options page.</p>
+            </div>
+        );
+    }
 
     return (
         <Ready
             root={state.root}
             recycleBinGroupUuid={state.recycleBinGroupUuid}
+            vaultUuid={state.vaultUuid}
             selectedGroupUuid={state.selectedGroupUuid}
             selectedEntryUuid={state.selectedEntryUuid}
             onReload={reloadTree}
@@ -93,12 +115,14 @@ export function App() {
 function Ready({
     root,
     recycleBinGroupUuid,
+    vaultUuid,
     selectedGroupUuid,
     selectedEntryUuid,
     onReload
 }: {
     root: GroupNode;
     recycleBinGroupUuid: string | undefined;
+    vaultUuid: string | undefined;
     selectedGroupUuid: string;
     selectedEntryUuid: string | undefined;
     onReload: (keepSelection?: { groupUuid: string; entryUuid?: string }) => Promise<void>;
@@ -112,6 +136,27 @@ function Ready({
     const [showAiSort, setShowAiSort] = useState(false);
     const [fetchingFavicons, setFetchingFavicons] = useState(false);
     const [faviconStatus, setFaviconStatus] = useState<string | undefined>(undefined);
+    const [search, setSearch] = useState('');
+    const [searchResults, setSearchResults] = useState<EntrySummary[] | undefined>(undefined);
+
+    // Password matching runs in the background, not here — passwords never enter this state (§8.2).
+    useEffect(() => {
+        const term = search.trim();
+        if (!term) {
+            setSearchResults(undefined);
+            return;
+        }
+        const handle = setTimeout(() => {
+            void sendToBackground({ type: 'SEARCH_ENTRIES', query: term }).then((response) => {
+                if (response.ok && response.type === 'SEARCH_ENTRIES') {
+                    setSearchResults(response.entries);
+                }
+            });
+        }, 150);
+        return () => clearTimeout(handle);
+    }, [search]);
+
+    const displayedEntries = sortByName(searchResults ?? selectedGroup.entries, (entry) => entry.title);
 
     function selectGroup(groupUuid: string): void {
         void onReload({ groupUuid });
@@ -227,11 +272,39 @@ function Ready({
         }
     }
 
+    async function lockVault(): Promise<void> {
+        await sendToBackground({ type: 'LOCK_VAULT' });
+        await onReload();
+    }
+
+    async function disconnectVault(): Promise<void> {
+        await sendToBackground({ type: 'LOCK_VAULT' });
+        await clearConfiguredVault();
+        await onReload();
+    }
+
+    async function emptyRecycleBin(): Promise<void> {
+        if (!window.confirm('Permanently delete everything in the Recycle Bin? This cannot be undone.')) {
+            return;
+        }
+        const response = await sendToBackground({ type: 'EMPTY_RECYCLE_BIN' });
+        if (response.ok && response.type === 'EMPTY_RECYCLE_BIN') {
+            await onReload({ groupUuid: selectedGroupUuid });
+        }
+    }
+
     return (
         <div className="layout">
             <div className="tree-pane">
-                <div className="tree-pane-header">
-                    <strong>Groups</strong>
+                <input
+                    type="text"
+                    className="entry-search"
+                    placeholder="Search all entries"
+                    title="Searches title, username, URL, and password"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                />
+                <div className="tree-pane-toolbar">
                     <button
                         type="button"
                         className="icon-button"
@@ -279,6 +352,27 @@ function Ready({
                     >
                         {fetchingFavicons ? '⏳' : '🌐'}
                     </button>
+                    <button
+                        type="button"
+                        className="icon-button"
+                        title="Lock database"
+                        aria-label="Lock database"
+                        onClick={() => void lockVault()}
+                    >
+                        🔒
+                    </button>
+                    <button
+                        type="button"
+                        className="icon-button danger"
+                        title="Disconnect this database"
+                        aria-label="Disconnect this database"
+                        onClick={() => void disconnectVault()}
+                    >
+                        ✕
+                    </button>
+                </div>
+                <div className="tree-pane-header">
+                    <strong>Groups</strong>
                 </div>
                 {faviconStatus && (
                     <p className="entry-row-username" style={{ padding: '0 0.5rem' }}>
@@ -289,6 +383,7 @@ function Ready({
                     node={root}
                     depth={0}
                     selectedGroupUuid={selectedGroupUuid}
+                    recycleBinGroupUuid={recycleBinGroupUuid}
                     onSelect={selectGroup}
                     onCreateChild={createGroup}
                     onRename={renameGroup}
@@ -298,13 +393,25 @@ function Ready({
             </div>
             <div className="middle-pane">
                 <div className="middle-pane-header">
-                    <strong>{selectedGroup.name || 'Entries'}</strong>
-                    <button type="button" onClick={() => void createEntry()}>
-                        + Entry
-                    </button>
+                    <strong>{search.trim() ? `Search results (${displayedEntries.length})` : selectedGroup.name || 'Entries'}</strong>
+                    {!search.trim() && selectedGroupUuid === recycleBinGroupUuid ? (
+                        <button
+                            type="button"
+                            onClick={() => void emptyRecycleBin()}
+                            disabled={selectedGroup.entries.length === 0 && selectedGroup.groups.length === 0}
+                        >
+                            Empty Recycle Bin
+                        </button>
+                    ) : (
+                        <button type="button" onClick={() => void createEntry()}>
+                            + Entry
+                        </button>
+                    )}
                 </div>
-                {selectedGroup.entries.length === 0 && <p className="empty-state">No entries in this group.</p>}
-                {sortByName(selectedGroup.entries, (entry) => entry.title).map((entry) => (
+                {displayedEntries.length === 0 && (
+                    <p className="empty-state">{search.trim() ? 'No matching entries.' : 'No entries in this group.'}</p>
+                )}
+                {displayedEntries.map((entry) => (
                     <div
                         key={entry.uuid}
                         className={`entry-row${entry.uuid === selectedEntryUuid ? ' selected' : ''}`}
@@ -340,6 +447,7 @@ function Ready({
                     <AiSortPanel
                         root={root}
                         recycleBinGroupUuid={recycleBinGroupUuid}
+                        vaultUuid={vaultUuid}
                         onApplied={() => void onReload({ groupUuid: selectedGroupUuid })}
                         onClose={() => setShowAiSort(false)}
                     />
@@ -417,15 +525,18 @@ function PasswordHealthPanel({ report, onClose }: { report: PasswordHealthReport
 function AiSortPanel({
     root,
     recycleBinGroupUuid,
+    vaultUuid,
     onApplied,
     onClose
 }: {
     root: GroupNode;
     recycleBinGroupUuid: string | undefined;
+    vaultUuid: string | undefined;
     onApplied: () => void;
     onClose: () => void;
 }) {
-    const exportText = useMemo(() => buildAiSortExport(root, recycleBinGroupUuid), [root, recycleBinGroupUuid]);
+    const [alreadySorted, setAlreadySorted] = useState<Set<string>>(new Set());
+    const [includeAlreadySorted, setIncludeAlreadySorted] = useState(false);
     const [pasted, setPasted] = useState('');
     const [diff, setDiff] = useState<AiSortDiff | undefined>(undefined);
     const [error, setError] = useState<string | undefined>(undefined);
@@ -433,8 +544,26 @@ function AiSortPanel({
     const [copied, setCopied] = useState(false);
     const [applying, setApplying] = useState(false);
 
+    useEffect(() => {
+        if (!vaultUuid) {
+            return;
+        }
+        void getSortedEntryUuids(vaultUuid).then(setAlreadySorted);
+    }, [vaultUuid]);
+
+    const exportInfo = useMemo(
+        () =>
+            buildAiSortExport(
+                root,
+                recycleBinGroupUuid,
+                includeAlreadySorted ? new Set() : alreadySorted,
+                includeAlreadySorted
+            ),
+        [root, recycleBinGroupUuid, includeAlreadySorted, alreadySorted]
+    );
+
     async function copyExport(): Promise<void> {
-        await navigator.clipboard.writeText(exportText);
+        await navigator.clipboard.writeText(exportInfo.text);
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
     }
@@ -465,6 +594,10 @@ function AiSortPanel({
                 setError(!response.ok ? response.error : 'Applying changes failed.');
                 return;
             }
+            if (vaultUuid) {
+                await markEntriesSorted(vaultUuid, diff.consideredEntryUuids);
+                setAlreadySorted(await getSortedEntryUuids(vaultUuid));
+            }
             setStatus(
                 `Created ${response.groupsCreated} ${response.groupsCreated === 1 ? 'group' : 'groups'}, moved ` +
                     `${response.entriesMoved} ${response.entriesMoved === 1 ? 'entry' : 'entries'}.`
@@ -494,10 +627,20 @@ function AiSortPanel({
             </p>
             <div className="field">
                 <label>Export</label>
-                <textarea readOnly rows={6} value={exportText} onFocus={(e) => e.target.select()} />
-                <button type="button" onClick={() => void copyExport()}>
+                <textarea readOnly rows={6} value={exportInfo.text} onFocus={(e) => e.target.select()} />
+                <button type="button" onClick={() => void copyExport()} disabled={exportInfo.includedCount === 0}>
                     {copied ? 'Copied!' : 'Copy to clipboard'}
                 </button>
+                {exportInfo.skippedCount > 0 && (
+                    <label>
+                        <input
+                            type="checkbox"
+                            checked={includeAlreadySorted}
+                            onChange={(e) => setIncludeAlreadySorted(e.target.checked)}
+                        />{' '}
+                        Re-sort already sorted entries ({exportInfo.skippedCount} hidden)
+                    </label>
+                )}
             </div>
             <div className="field">
                 <label>Paste the AI's reply</label>
@@ -904,6 +1047,7 @@ function GroupTreeNode({
     node,
     depth,
     selectedGroupUuid,
+    recycleBinGroupUuid,
     onSelect,
     onCreateChild,
     onRename,
@@ -913,12 +1057,16 @@ function GroupTreeNode({
     node: GroupNode;
     depth: number;
     selectedGroupUuid: string;
+    recycleBinGroupUuid: string | undefined;
     onSelect: (uuid: string) => void;
     onCreateChild: (parentUuid: string) => Promise<void>;
     onRename: (uuid: string, currentName: string) => Promise<void>;
     onDelete: (uuid: string) => Promise<void>;
     isRoot?: boolean;
 }) {
+    // Recycle Bin always sorts to the bottom, set off by a separator, instead of wherever its name lands alphabetically.
+    const regularGroups = node.groups.filter((group) => group.uuid !== recycleBinGroupUuid);
+    const recycleBin = node.groups.find((group) => group.uuid === recycleBinGroupUuid);
     return (
         <div className="tree-node">
             <div
@@ -968,18 +1116,35 @@ function GroupTreeNode({
             </div>
             {node.groups.length > 0 && (
                 <div className="tree-children">
-                    {sortByName(node.groups, (group) => group.name).map((child) => (
+                    {sortByName(regularGroups, (group) => group.name).map((child) => (
                         <GroupTreeNode
                             key={child.uuid}
                             node={child}
                             depth={depth + 1}
                             selectedGroupUuid={selectedGroupUuid}
+                            recycleBinGroupUuid={recycleBinGroupUuid}
                             onSelect={onSelect}
                             onCreateChild={onCreateChild}
                             onRename={onRename}
                             onDelete={onDelete}
                         />
                     ))}
+                    {recycleBin && (
+                        <>
+                            <hr className="tree-separator" />
+                            <GroupTreeNode
+                                key={recycleBin.uuid}
+                                node={recycleBin}
+                                depth={depth + 1}
+                                selectedGroupUuid={selectedGroupUuid}
+                                recycleBinGroupUuid={recycleBinGroupUuid}
+                                onSelect={onSelect}
+                                onCreateChild={onCreateChild}
+                                onRename={onRename}
+                                onDelete={onDelete}
+                            />
+                        </>
+                    )}
                 </div>
             )}
         </div>

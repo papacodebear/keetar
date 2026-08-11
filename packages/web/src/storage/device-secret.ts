@@ -1,6 +1,7 @@
 import { ByteUtils } from '@keetar/core';
+import { getKvStore } from './opfs-kv-store';
 
-// Device-local AES-GCM key in OPFS for encrypting OAuth tokens and other secrets.
+// Device-local AES-GCM key for encrypting OAuth tokens and other secrets.
 const FILE_NAME = 'device-secret.bin';
 const KEY_LENGTH_BYTES = 32;
 
@@ -12,21 +13,11 @@ function getOrCreateDeviceSecret(): Promise<CryptoKey> {
 }
 
 async function loadOrGenerate(): Promise<CryptoKey> {
-    const root = await navigator.storage.getDirectory();
-    let raw: ArrayBuffer;
-    try {
-        const handle = await root.getFileHandle(FILE_NAME);
-        const file = await handle.getFile();
-        raw = await file.arrayBuffer();
-    } catch (e) {
-        if (!(e instanceof DOMException && e.name === 'NotFoundError')) {
-            throw e;
-        }
+    const store = await getKvStore();
+    let raw = await store.read(FILE_NAME);
+    if (!raw) {
         raw = ByteUtils.arrayToBuffer(globalThis.crypto.getRandomValues(new Uint8Array(KEY_LENGTH_BYTES)));
-        const handle = await root.getFileHandle(FILE_NAME, { create: true });
-        const writable = await handle.createWritable();
-        await writable.write(raw);
-        await writable.close();
+        await store.write(FILE_NAME, raw);
     }
     return globalThis.crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }

@@ -65,16 +65,21 @@ export function App() {
             setState(await notReadyState());
             return;
         }
-        await reloadTree();
+        const entryUuid = new URLSearchParams(window.location.search).get('entry') ?? undefined;
+        await reloadTree(entryUuid ? { entryUuid } : undefined);
     }
 
-    async function reloadTree(keepSelection?: { groupUuid: string; entryUuid?: string }): Promise<void> {
+    async function reloadTree(keepSelection?: { groupUuid?: string; entryUuid?: string }): Promise<void> {
         const response = await sendToBackground({ type: 'GET_GROUP_TREE' });
         if (!response.ok || response.type !== 'GET_GROUP_TREE') {
             setState(await notReadyState());
             return;
         }
         const configured = await getConfiguredVault();
+        const selectedGroupUuid =
+            keepSelection?.groupUuid ??
+            (keepSelection?.entryUuid ? findEntryParentGroupUuid(response.root, keepSelection.entryUuid) : undefined) ??
+            response.root.uuid;
         setState({
             kind: 'ready',
             root: response.root,
@@ -82,7 +87,7 @@ export function App() {
             vaultUuid: configured?.uuid,
             vaultName: configured?.name,
             vaultProvider: configured?.provider,
-            selectedGroupUuid: keepSelection?.groupUuid ?? response.root.uuid,
+            selectedGroupUuid,
             selectedEntryUuid: keepSelection?.entryUuid
         });
     }
@@ -91,12 +96,7 @@ export function App() {
         return <p style={{ padding: '1rem' }}>Loading…</p>;
     }
     if (state.kind === 'locked') {
-        return (
-            <div className="empty-state">
-                <p>The vault is locked.</p>
-                <p>Unlock it from the extension's popup, then reopen this tab.</p>
-            </div>
-        );
+        return <RedirectToOptions />;
     }
     if (state.kind === 'disconnected') {
         return (
@@ -119,6 +119,13 @@ export function App() {
             onReload={reloadTree}
         />
     );
+}
+
+function RedirectToOptions() {
+    useEffect(() => {
+        window.location.replace(chrome.runtime.getURL('options/options.html'));
+    }, []);
+    return null;
 }
 
 function Ready({
@@ -308,7 +315,7 @@ function Ready({
 
     async function lockVault(): Promise<void> {
         await sendToBackground({ type: 'LOCK_VAULT' });
-        await onReload();
+        window.location.replace(chrome.runtime.getURL('options/options.html'));
     }
 
     async function disconnectVault(): Promise<void> {
@@ -1323,6 +1330,13 @@ function flattenGroups(node: GroupNode): GroupNode[] {
 
 function findGroup(node: GroupNode, uuid: string): GroupNode | undefined {
     return flattenGroups(node).find((g) => g.uuid === uuid);
+}
+
+function findEntryParentGroupUuid(node: GroupNode, entryUuid: string): string | undefined {
+    if (node.entries.some((entry) => entry.uuid === entryUuid)) {
+        return node.uuid;
+    }
+    return node.groups.map((group) => findEntryParentGroupUuid(group, entryUuid)).find(Boolean);
 }
 
 function isGroupInRecycleBin(root: GroupNode, groupUuid: string, recycleBinGroupUuid: string | undefined): boolean {

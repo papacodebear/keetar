@@ -52,10 +52,13 @@ export const runtime = {
     }
 };
 
-// Same promise-return pattern for tabs.query (used for active tab matching).
+// Same promise-return pattern for tab operations (used for matching and navigation).
 export const tabs = {
-    query(queryInfo: { active: boolean; currentWindow: boolean }): Promise<chrome.tabs.Tab[]> {
+    query(queryInfo: chrome.tabs.QueryInfo): Promise<chrome.tabs.Tab[]> {
         return chrome.tabs.query(queryInfo);
+    },
+    update(tabId: number, updateProperties: chrome.tabs.UpdateProperties): Promise<chrome.tabs.Tab> {
+        return chrome.tabs.update(tabId, updateProperties);
     },
     sendMessage(tabId: number, message: unknown): Promise<void> {
         return chrome.tabs.sendMessage(tabId, message);

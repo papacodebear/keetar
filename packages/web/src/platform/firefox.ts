@@ -30,7 +30,8 @@ declare const browser: {
         sendMessage(message: unknown): Promise<unknown>;
     };
     tabs: {
-        query(queryInfo: { active: boolean; currentWindow: boolean }): Promise<chrome.tabs.Tab[]>;
+        query(queryInfo: chrome.tabs.QueryInfo): Promise<chrome.tabs.Tab[]>;
+        update(tabId: number, updateProperties: chrome.tabs.UpdateProperties): Promise<chrome.tabs.Tab>;
         sendMessage(tabId: number, message: unknown): Promise<void>;
         onRemoved: {
             addListener(callback: (tabId: number) => void): void;
@@ -91,10 +92,13 @@ export const runtime = {
     }
 };
 
-// Same promise-return gap for tabs.query; use browser.tabs instead.
+// Same promise-return gap for tab operations; use browser.tabs instead.
 export const tabs = {
-    query(queryInfo: { active: boolean; currentWindow: boolean }): Promise<chrome.tabs.Tab[]> {
+    query(queryInfo: chrome.tabs.QueryInfo): Promise<chrome.tabs.Tab[]> {
         return browser.tabs.query(queryInfo);
+    },
+    update(tabId: number, updateProperties: chrome.tabs.UpdateProperties): Promise<chrome.tabs.Tab> {
+        return browser.tabs.update(tabId, updateProperties);
     },
     sendMessage(tabId: number, message: unknown): Promise<void> {
         return browser.tabs.sendMessage(tabId, message);

@@ -488,10 +488,22 @@ function UnlockedView({
         }
     }
 
-    // Manager owns editing; Popup only launches it (§8.1–8.2).
-    function openManager(): void {
-        void chrome.tabs.create({ url: chrome.runtime.getURL('manager/manager.html') });
+    // Manager owns editing; reuse its existing tab when possible (§8.1–8.2).
+    async function openManager(entryUuid?: string): Promise<void> {
+        await openManagerTab(entryUuid);
         window.close();
+    }
+
+    async function openManagerTab(entryUuid?: string): Promise<void> {
+        const managerUrl = chrome.runtime.getURL('manager/manager.html');
+        const url = entryUuid ? `${managerUrl}?${new URLSearchParams({ entry: entryUuid })}` : managerUrl;
+        const openTabs = await tabs.query({});
+        const existingManagerTab = openTabs.find((tab) => tab.url?.split(/[?#]/, 1)[0] === managerUrl);
+        if (existingManagerTab?.id !== undefined) {
+            await tabs.update(existingManagerTab.id, { active: true, url });
+            return;
+        }
+        await chrome.tabs.create({ url });
     }
 
     return (
@@ -510,16 +522,16 @@ function UnlockedView({
                     onHandled={onLoginPromptHandled}
                 />
             )}
-            {matchedUuids.size > 0 && (
-                <div className="toolbar">
+            <div className="toolbar">
+                <button type="button" className="view-all-button" onClick={() => void openManager()}>
+                    View all entries &amp; groups
+                </button>
+                {matchedUuids.size > 0 && (
                     <button type="button" onClick={() => void redetectFields()} title="Detect login fields on this page">
                         Detect fields
                     </button>
-                </div>
-            )}
-            <button type="button" className="view-all-button" onClick={openManager}>
-                View all entries &amp; groups
-            </button>
+                )}
+            </div>
             {toast && <p className="copy-toast">{toast}</p>}
             <ul className="entry-list">
                 {matchedEntries.map((entry) => (
@@ -549,6 +561,14 @@ function UnlockedView({
                                     </button>
                                 </>
                             )}
+                            <button
+                                type="button"
+                                title="Open in Manage"
+                                aria-label={`Open ${entry.title || 'entry'} in Manage`}
+                                onClick={() => void openManager(entry.uuid)}
+                            >
+                                …
+                            </button>
                         </div>
                     </li>
                 ))}

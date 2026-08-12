@@ -26,10 +26,12 @@ import type {
 import { getConfiguredVault } from '../config/vault-config';
 import { createFileProvider } from '../providers';
 import { fetchFaviconPng } from './favicon';
+import type { CapturedLogin } from './login-capture';
 import {
     findExactDuplicateGroups,
     findExactDuplicateMatches,
     findDuplicateGroups,
+    entriesToRemoveFromDuplicateGroups,
     findNonConflicting,
     mergeIcon,
     mergeStringField,
@@ -237,6 +239,13 @@ class VaultSession {
         return fieldText(entry.fields.get(fieldName));
     }
 
+    matchesEntryCredentials(entryUuid: string, username: string, password: string): boolean {
+        const entry = this.requireEntry(entryUuid);
+        return (
+            fieldText(entry.fields.get('UserName')) === username && fieldText(entry.fields.get('Password')) === password
+        );
+    }
+
     getEntryTotp(entryUuid: string): Promise<Totp.TotpCode> {
         const entry = this.requireEntry(entryUuid);
         const value = fieldText(entry.fields.get('otp')) || fieldText(entry.fields.get('TOTP Seed'));
@@ -274,19 +283,7 @@ class VaultSession {
     async removeDuplicateEntries(keepEntryUuids: string[]): Promise<number> {
         const db = this.requireUnlocked();
         const groups = findExactDuplicateGroups(kdbxToRecords(db));
-        const selectedUuids = new Set(keepEntryUuids);
-        if (selectedUuids.size !== groups.length) {
-            throw new Error('choose one entry to keep from each duplicate set');
-        }
-
-        const entriesToRemove: IdentifiedRecord[] = [];
-        for (const group of groups) {
-            const selected = group.entries.filter((entry) => selectedUuids.has(entry.uuid));
-            if (selected.length !== 1) {
-                throw new Error('choose one entry to keep from each duplicate set');
-            }
-            entriesToRemove.push(...group.entries.filter((entry) => entry.uuid !== selected[0].uuid));
-        }
+        const entriesToRemove = entriesToRemoveFromDuplicateGroups(groups, keepEntryUuids);
         for (const record of entriesToRemove) {
             const entry = this.requireEntry(record.uuid);
             db.remove(entry);
@@ -354,6 +351,37 @@ class VaultSession {
         const entry = this.requireEntry(entryUuid);
         entry.pushHistory();
         applyFields(db, entry, fields);
+        entry.times.update();
+        await this.persist();
+    }
+
+    /** Saves a reviewed login capture at the vault root and fetches its favicon when available. */
+    async createEntryFromCapturedLogin(login: CapturedLogin & { username: string; password: string }): Promise<EntrySummary> {
+        const db = this.requireUnlocked();
+        const entry = db.createEntry(db.getDefaultGroup());
+        applyFields(db, entry, loginFields(login));
+        try {
+            await this.applyFaviconToEntry(db, entry);
+        } catch {
+            // A favicon is an enhancement; it must not prevent the credential from being saved.
+        }
+        await this.persist();
+        return summarizeEntry(entry);
+    }
+
+    /** Updates a reviewed entry from a login capture, preserving an existing custom icon. */
+    async updateEntryFromCapturedLogin(entryUuid: string, login: CapturedLogin & { username: string; password: string }): Promise<void> {
+        const db = this.requireUnlocked();
+        const entry = this.requireEntry(entryUuid);
+        entry.pushHistory();
+        applyFields(db, entry, loginFields(login));
+        if (!entry.customIcon) {
+            try {
+                await this.applyFaviconToEntry(db, entry);
+            } catch {
+                // A favicon is an enhancement; it must not prevent the credential update.
+            }
+        }
         entry.times.update();
         await this.persist();
     }
@@ -850,6 +878,15 @@ async function copyAttachments(
         const copied = await db.createBinary(data);
         targetEntry.binaries.set(name, copied);
     }
+}
+
+function loginFields(login: CapturedLogin & { username: string; password: string }): EntryFields {
+    return {
+        title: login.title.trim() || login.url,
+        username: login.username,
+        password: login.password,
+        url: login.url
+    };
 }
 
 function applyFields(db: Kdbx, entry: KdbxEntry, fields: EntryFields): void {

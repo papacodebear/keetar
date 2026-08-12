@@ -3,6 +3,7 @@ import {
     findExactDuplicateGroups,
     findExactDuplicateMatches,
     findDuplicateGroups,
+    entriesToRemoveFromDuplicateGroups,
     findNonConflicting,
     isIdenticalMatch,
     matchKey,
@@ -56,6 +57,65 @@ describe('exact credential duplicates', () => {
         ).toEqual([]);
     });
 
+    test('groups sparse entries with the same title and password', () => {
+        const groups = findExactDuplicateGroups([
+            record({ uuid: 'first', title: '  Shared account ', password: 'same' }),
+            record({ uuid: 'second', title: 'shared ACCOUNT', password: 'same' })
+        ]);
+
+        expect(groups).toHaveLength(1);
+        expect(groups[0].entries.map((entry) => entry.uuid)).toEqual(['first', 'second']);
+    });
+
+    test('does not group sparse entries with different titles', () => {
+        expect(
+            findExactDuplicateGroups([
+                record({ uuid: 'first', title: 'Personal', password: 'same' }),
+                record({ uuid: 'second', title: 'Work', password: 'same' })
+            ])
+        ).toEqual([]);
+    });
+
+    test('normalizes equivalent usernames and URLs', () => {
+        const groups = findExactDuplicateGroups([
+            record({
+                uuid: 'first',
+                username: ' Alice ',
+                password: 'same',
+                url: 'https://www.Example.com:443/login/#form'
+            }),
+            record({
+                uuid: 'second',
+                username: 'alice',
+                password: 'same',
+                url: 'http://example.com/login/'
+            })
+        ]);
+
+        expect(groups).toHaveLength(1);
+        expect(groups[0].entries.map((entry) => entry.uuid)).toEqual(['first', 'second']);
+    });
+
+    test('matches the same credential across paths and query strings on one host', () => {
+        const groups = findExactDuplicateGroups([
+            record({ uuid: 'login', username: 'alice', password: 'same', url: 'https://example.com/login' }),
+            record({ uuid: 'admin', username: 'alice', password: 'same', url: 'https://example.com/admin' }),
+            record({ uuid: 'query', username: 'alice', password: 'same', url: 'https://example.com/login?tenant=b' })
+        ]);
+
+        expect(groups).toHaveLength(1);
+        expect(groups[0].entries.map((entry) => entry.uuid)).toEqual(['login', 'admin', 'query']);
+    });
+
+    test('keeps credentials on different hosts distinct', () => {
+        expect(
+            findExactDuplicateGroups([
+                record({ uuid: 'example', username: 'alice', password: 'same', url: 'https://example.com/login' }),
+                record({ uuid: 'other', username: 'alice', password: 'same', url: 'https://other.example.com/login' })
+            ])
+        ).toEqual([]);
+    });
+
     test('finds incoming exact matches before broader combine conflict matching', () => {
         const matches = findExactDuplicateMatches(
             [record({ uuid: 'primary', username: 'alice', password: 'same', url: 'https://example.com' })],
@@ -65,6 +125,61 @@ describe('exact credential duplicates', () => {
         expect(matches).toEqual([
             expect.objectContaining({ primary: expect.objectContaining({ uuid: 'primary' }), secondary: expect.objectContaining({ uuid: 'secondary' }) })
         ]);
+    });
+
+    test('finds equivalent incoming credential matches', () => {
+        const matches = findExactDuplicateMatches(
+            [record({ uuid: 'primary', username: 'Alice', password: 'same', url: 'https://www.example.com/login/' })],
+            [record({ uuid: 'secondary', username: 'alice', password: 'same', url: 'http://example.com/login#form' })]
+        );
+
+        expect(matches).toHaveLength(1);
+    });
+
+    test('finds incoming sparse title-and-password matches', () => {
+        const matches = findExactDuplicateMatches(
+            [record({ uuid: 'primary', title: 'Shared account', password: 'same' })],
+            [record({ uuid: 'secondary', title: ' shared ACCOUNT ', password: 'same' })]
+        );
+
+        expect(matches).toHaveLength(1);
+    });
+});
+
+describe('entriesToRemoveFromDuplicateGroups', () => {
+    const groups = [
+        {
+            entries: [
+                record({ uuid: 'a1', username: 'alice', password: 'same', url: 'https://example.com' }),
+                record({ uuid: 'a2', username: 'alice', password: 'same', url: 'https://example.com' }),
+                record({ uuid: 'a3', username: 'alice', password: 'same', url: 'https://example.com' })
+            ]
+        },
+        {
+            entries: [
+                record({ uuid: 'b1', username: 'bob', password: 'same', url: 'https://example.com' }),
+                record({ uuid: 'b2', username: 'bob', password: 'same', url: 'https://example.com' })
+            ]
+        }
+    ];
+
+    test('allows retaining multiple entries in a duplicate set', () => {
+        expect(entriesToRemoveFromDuplicateGroups(groups, ['a1', 'a2', 'b1']).map((entry) => entry.uuid)).toEqual([
+            'a3',
+            'b2'
+        ]);
+    });
+
+    test('requires at least one retained entry in every duplicate set', () => {
+        expect(() => entriesToRemoveFromDuplicateGroups(groups, ['a1'])).toThrow(
+            'keep at least one entry from each duplicate set'
+        );
+    });
+
+    test('rejects entries that are not in a duplicate set', () => {
+        expect(() => entriesToRemoveFromDuplicateGroups(groups, ['a1', 'b1', 'other'])).toThrow(
+            'choose only entries from the current duplicate sets'
+        );
     });
 });
 

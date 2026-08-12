@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ByteUtils } from '@keetar/core';
-import { createVaultFile, pickVaultFile } from '../../providers/local-file';
+import { createVaultFile, ensureVaultFilePermission, pickVaultFile } from '../../providers/local-file';
 import {
     clearConfiguredVault,
     getConfiguredVault,
@@ -16,6 +16,7 @@ import { checkVaultSyncStatus, resolveVaultSyncConflict } from '../../providers'
 import type { SyncStatus } from '../../providers/opfs-cache';
 import { createEmptyVaultBytes } from '../../providers/vault-creation';
 import { sendToBackground } from '../../background/message-bus';
+import { VaultProviderIcon } from '../shared/VaultProviderIcon';
 
 // Setup & config without vault unlock; owns backend setup and biometric enrollment (§8.1–8.2).
 
@@ -117,7 +118,7 @@ function DatabaseSection({
     const [showBiometric, setShowBiometric] = useState(false);
     const [pickBusy, setPickBusy] = useState(false);
     const [pickError, setPickError] = useState<string | undefined>(undefined);
-    const lockState = useVaultLockState(vault.uuid);
+    const lockState = useVaultLockState(vault);
     const sync = useVaultSyncStatus(vault, onChanged);
 
     // Form visibility follows lock status directly — no extra click to reveal it.
@@ -165,8 +166,8 @@ function DatabaseSection({
     return (
         <section>
             <div className="vault-badge">
+                <VaultProviderIcon provider={vault.provider} />
                 <span className="vault-badge-text">
-                    {vault.provider === 'gdrive' ? 'Google Drive' : 'Local'}:{' '}
                     <button
                         type="button"
                         className="vault-name-button"
@@ -251,13 +252,13 @@ function DatabaseSection({
 type LockAttemptResult = { ok: true } | { ok: false; error: string };
 
 // Drives shared background session lock state, synced with Popup (§8.1).
-function useVaultLockState(vaultUuid: string) {
+function useVaultLockState(vault: ConfiguredVault) {
     const [status, setStatus] = useState<'checking' | 'locked' | 'unlocked'>('checking');
 
     useEffect(() => {
         void refresh();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [vaultUuid]);
+    }, [vault.uuid]);
 
     async function refresh(): Promise<void> {
         setStatus('checking');
@@ -271,20 +272,30 @@ function useVaultLockState(vaultUuid: string) {
     }
 
     async function unlockWithPassword(password: string): Promise<LockAttemptResult> {
-        const response = await sendToBackground({ type: 'UNLOCK_VAULT', uuid: vaultUuid, password });
-        if (response.ok) {
-            await refresh();
-            return { ok: true };
+        try {
+            if (vault.provider === 'local-file') {
+                await ensureVaultFilePermission(vault.uuid);
+            }
+            const response = await sendToBackground({ type: 'UNLOCK_VAULT', uuid: vault.uuid, password });
+            if (response.ok) {
+                await refresh();
+                return { ok: true };
+            }
+            return { ok: false, error: response.error };
+        } catch (e) {
+            return { ok: false, error: e instanceof Error ? e.message : String(e) };
         }
-        return { ok: false, error: response.error };
     }
 
     async function unlockWithBiometrics(): Promise<LockAttemptResult> {
         try {
-            const passwordHash = await unlockToPasswordHash(vaultUuid);
+            if (vault.provider === 'local-file') {
+                await ensureVaultFilePermission(vault.uuid);
+            }
+            const passwordHash = await unlockToPasswordHash(vault.uuid);
             const response = await sendToBackground({
                 type: 'UNLOCK_VAULT_WITH_HASH',
-                uuid: vaultUuid,
+                uuid: vault.uuid,
                 passwordHashBase64: ByteUtils.bytesToBase64(new Uint8Array(passwordHash))
             });
             if (response.ok) {

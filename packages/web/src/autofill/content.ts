@@ -10,6 +10,7 @@ let menuHost: HTMLDivElement | undefined;
 let entryMarkerHost: HTMLDivElement | undefined;
 let entryMarkerField: HTMLInputElement | undefined;
 let entryMarkerResizeObserver: ResizeObserver | undefined;
+const capturedLoginForms = new WeakSet<HTMLFormElement>();
 
 function tryDetectAndNotify(): boolean {
     const form = detectLoginForm(document);
@@ -17,8 +18,31 @@ function tryDetectAndNotify(): boolean {
         return false;
     }
     void sendToBackground({ type: 'LOGIN_FORM_DETECTED' });
+    captureSubmittedLogin(form);
     void loadPageEntryMatches(form);
     return true;
+}
+
+function captureSubmittedLogin(form: ReturnType<typeof detectLoginForm>): void {
+    const loginForm = form?.usernameField?.form ?? form?.passwordField?.form;
+    if (!loginForm || capturedLoginForms.has(loginForm)) {
+        return;
+    }
+    capturedLoginForms.add(loginForm);
+    loginForm.addEventListener('submit', () => {
+        const username = form?.usernameField?.value.trim();
+        const password = form?.passwordField?.value;
+        if (!username && !password) {
+            return;
+        }
+        void sendToBackground({
+            type: 'CAPTURE_LOGIN_CREDENTIALS',
+            title: document.title,
+            url: window.location.href,
+            username: username || undefined,
+            password: password || undefined
+        });
+    });
 }
 
 async function loadPageEntryMatches(form: ReturnType<typeof detectLoginForm>): Promise<void> {

@@ -8,10 +8,11 @@ import {
 } from '@keetar/core';
 import { installArgon2 } from './argon2-wasm';
 import { vaultSession } from './vault-session';
-import { registerMessageHandler, type KeetarResponse } from './message-bus';
+import { registerMessageHandler, type KeetarResponse, type PendingLoginPrompt } from './message-bus';
 import { startKeepalive } from './keepalive';
-import { action, idle, tabs } from '../platform';
+import { action, idle, sessionStorage, tabs } from '../platform';
 import { matchEntries } from '../autofill/matcher';
+import { hasCompleteCapturedLogin, mergeCapturedLogin, type CapturedLogin } from './login-capture';
 
 // Entry point — registers listeners, initialises session (§2.4).
 
@@ -21,6 +22,67 @@ void preloadPasswordStrength();
 
 // Idle timeout (§3.4): lock on "locked" or "idle" state. 5 min default.
 const DEFAULT_IDLE_TIMEOUT_SECONDS = 5 * 60;
+const PENDING_LOGIN_STORAGE_KEY = 'keetar.pendingLoginCaptures';
+const PENDING_LOGIN_BADGE_COLOR = '#dc2626';
+const DEFAULT_BADGE_COLOR = '#2563eb';
+type PendingLoginCaptures = Record<string, CapturedLogin>;
+
+async function getCapturedLogin(tabId: number): Promise<CapturedLogin | undefined> {
+    return (await sessionStorage.get<PendingLoginCaptures>(PENDING_LOGIN_STORAGE_KEY))?.[String(tabId)];
+}
+
+async function captureLogin(tabId: number, login: CapturedLogin): Promise<void> {
+    const captures = (await sessionStorage.get<PendingLoginCaptures>(PENDING_LOGIN_STORAGE_KEY)) ?? {};
+    captures[String(tabId)] = mergeCapturedLogin(captures[String(tabId)], login);
+    await sessionStorage.set(PENDING_LOGIN_STORAGE_KEY, captures);
+}
+
+async function clearCapturedLogin(tabId: number): Promise<void> {
+    const captures = (await sessionStorage.get<PendingLoginCaptures>(PENDING_LOGIN_STORAGE_KEY)) ?? {};
+    delete captures[String(tabId)];
+    await sessionStorage.set(PENDING_LOGIN_STORAGE_KEY, captures);
+}
+
+async function pendingLoginPrompt(tabId: number): Promise<PendingLoginPrompt | undefined> {
+    const capture = await getCapturedLogin(tabId);
+    if (!hasCompleteCapturedLogin(capture) || vaultSession.status !== 'unlocked') {
+        return undefined;
+    }
+
+    const entries = vaultSession.listEntries();
+    const matchedEntries = matchEntries(entries, capture.url)
+        .map((match) => entries.find((entry) => entry.uuid === match.uuid))
+        .filter((entry): entry is (typeof entries)[number] => entry !== undefined);
+    if (matchedEntries.some((entry) => vaultSession.matchesEntryCredentials(entry.uuid, capture.username, capture.password))) {
+        await clearCapturedLogin(tabId);
+        return undefined;
+    }
+
+    return {
+        kind: matchedEntries.length > 0 ? 'update' : 'save',
+        title: capture.title || capture.url,
+        url: capture.url,
+        username: capture.username,
+        updateCandidates: matchedEntries.map((entry) => ({ uuid: entry.uuid, title: entry.title }))
+    };
+}
+
+async function updateTabBadge(tabId: number, tabUrl: string): Promise<void> {
+    const prompt = await pendingLoginPrompt(tabId);
+    if (prompt) {
+        await action.setBadgeBackgroundColor({ tabId, color: PENDING_LOGIN_BADGE_COLOR });
+        await action.setBadgeText({ tabId, text: '!' });
+        return;
+    }
+    const matches = vaultSession.status === 'unlocked' ? matchEntries(vaultSession.listEntries(), tabUrl) : [];
+    await action.setBadgeBackgroundColor({ tabId, color: DEFAULT_BADGE_COLOR });
+    await action.setBadgeText({ tabId, text: matches.length > 0 ? String(matches.length) : '' });
+}
+
+tabs.onRemoved((tabId) => {
+    void clearCapturedLogin(tabId);
+});
+
 idle.setDetectionInterval(DEFAULT_IDLE_TIMEOUT_SECONDS);
 idle.onStateChanged((state) => {
     if ((state === 'idle' || state === 'locked') && vaultSession.status === 'unlocked') {
@@ -76,16 +138,54 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
                 type: 'REMOVE_DUPLICATE_ENTRIES',
                 removed: await vaultSession.removeDuplicateEntries(request.keepEntryUuids)
             };
+        case 'CAPTURE_LOGIN_CREDENTIALS': {
+            const tabId = sender.tab?.id;
+            if (tabId !== undefined && vaultSession.status === 'unlocked') {
+                await captureLogin(tabId, request);
+                await updateTabBadge(tabId, sender.tab?.url ?? request.url);
+            }
+            return { ok: true, type: 'CAPTURE_LOGIN_CREDENTIALS' };
+        }
+        case 'GET_PENDING_LOGIN_PROMPT':
+            return { ok: true, type: 'GET_PENDING_LOGIN_PROMPT', prompt: await pendingLoginPrompt(request.tabId) };
+        case 'APPLY_PENDING_LOGIN_PROMPT': {
+            if (request.action === 'dismiss') {
+                await clearCapturedLogin(request.tabId);
+                await action.setBadgeBackgroundColor({ tabId: request.tabId, color: DEFAULT_BADGE_COLOR });
+                await action.setBadgeText({ tabId: request.tabId, text: '' });
+                return { ok: true, type: 'APPLY_PENDING_LOGIN_PROMPT' };
+            }
+            const capture = await getCapturedLogin(request.tabId);
+            const prompt = await pendingLoginPrompt(request.tabId);
+            if (!hasCompleteCapturedLogin(capture) || !prompt) {
+                throw new Error('there is no pending login to save');
+            }
+            if (request.action === 'save') {
+                if (prompt.kind !== 'save') {
+                    throw new Error('choose an existing entry to update');
+                }
+                await vaultSession.createEntryFromCapturedLogin(capture);
+            } else {
+                if (
+                    prompt.kind !== 'update' ||
+                    !request.entryUuid ||
+                    !prompt.updateCandidates.some((entry) => entry.uuid === request.entryUuid)
+                ) {
+                    throw new Error('choose an entry that matches this page');
+                }
+                await vaultSession.updateEntryFromCapturedLogin(request.entryUuid, capture);
+            }
+            await clearCapturedLogin(request.tabId);
+            await action.setBadgeBackgroundColor({ tabId: request.tabId, color: DEFAULT_BADGE_COLOR });
+            await action.setBadgeText({ tabId: request.tabId, text: '' });
+            return { ok: true, type: 'APPLY_PENDING_LOGIN_PROMPT' };
+        }
         case 'LOGIN_FORM_DETECTED': {
             // Update toolbar badge with match count (background decides autofill logic).
             const tabId = sender.tab?.id;
             const tabUrl = sender.tab?.url;
-            if (tabId !== undefined && tabUrl && vaultSession.status === 'unlocked') {
-                const matches = matchEntries(vaultSession.listEntries(), tabUrl);
-                action.setBadgeText({
-                    tabId,
-                    text: matches.length > 0 ? String(matches.length) : ''
-                });
+            if (tabId !== undefined && tabUrl) {
+                await updateTabBadge(tabId, tabUrl);
             }
             return { ok: true, type: 'LOGIN_FORM_DETECTED' };
         }

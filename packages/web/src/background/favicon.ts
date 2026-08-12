@@ -2,12 +2,7 @@
 const CANDIDATE_PATHS = ['/favicon.ico', '/favicon.png'];
 
 export async function fetchFaviconPng(entryUrl: string): Promise<ArrayBuffer> {
-    let origin: string;
-    try {
-        origin = new URL(entryUrl).origin;
-    } catch {
-        throw new Error('entry has no valid URL to fetch a favicon from');
-    }
+    const origin = faviconOrigin(entryUrl);
 
     for (const path of CANDIDATE_PATHS) {
         try {
@@ -23,6 +18,53 @@ export async function fetchFaviconPng(entryUrl: string): Promise<ArrayBuffer> {
         }
     }
     throw new Error(`no favicon found at ${origin}`);
+}
+
+/**
+ * Converts common saved URL variants into an HTTP(S) origin for favicon
+ * lookup. Bare domains are treated as HTTPS. For a hostname-style regex with
+ * alternatives, select its first alternative: `(drive|photos|mail).google.com`
+ * becomes `https://drive.google.com`.
+ */
+export function faviconOrigin(entryUrl: string): string {
+    const value = entryUrl.trim();
+    if (!value) {
+        throw new Error('entry has no valid URL to fetch a favicon from');
+    }
+
+    const directOrigin = originFromUrl(value);
+    if (directOrigin) {
+        return directOrigin;
+    }
+
+    const regexHost = selectFirstHostAlternative(value);
+    const regexOrigin = originFromUrl(regexHost);
+    if (regexOrigin) {
+        return regexOrigin;
+    }
+
+    throw new Error('entry has no valid URL to fetch a favicon from');
+}
+
+function originFromUrl(value: string): string | undefined {
+    const hasScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(value);
+    if (!hasScheme && /^[a-z][a-z\d+.-]*:/i.test(value)) {
+        return undefined;
+    }
+    try {
+        const url = new URL(hasScheme ? value : `https://${value}`);
+        return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function selectFirstHostAlternative(value: string): string {
+    return value
+        .replace(/^\^/, '')
+        .replace(/\$$/, '')
+        .replace(/\(([^()|]+(?:\|[^()|]+)+)\)/g, (_match, alternatives: string) => alternatives.split('|')[0])
+        .replace(/\\([.])/g, '$1');
 }
 
 // Re-encode .ico to PNG for consistent storage format across clients.

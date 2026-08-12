@@ -51,6 +51,26 @@ async function getFileHandle(uuid: string): Promise<FileSystemFileHandle | undef
     return undefined;
 }
 
+/**
+ * Must run in a user-facing document as part of a click or form submission.
+ * Chrome can restore a stored file handle after an extension restart, but the
+ * browser may require this user-gesture permission renewal before a background
+ * service worker is allowed to read it.
+ */
+export async function ensureVaultFilePermission(uuid: string, mode: 'read' | 'readwrite' = 'readwrite'): Promise<void> {
+    const handle = await getFileHandle(uuid);
+    if (!handle) {
+        throw new Error('no usable file handle is stored for this vault; pick the database again in Options');
+    }
+    const opts = { mode };
+    if ((await handle.queryPermission(opts)) === 'granted') {
+        return;
+    }
+    if ((await handle.requestPermission(opts)) !== 'granted') {
+        throw new Error('file permission was not granted');
+    }
+}
+
 async function deleteFileHandle(uuid: string): Promise<void> {
     await withStore('readwrite', (store) => store.delete(uuid));
 }
@@ -110,6 +130,7 @@ export class LocalFileProvider implements FileProvider {
 
     async metadata(_path: string): Promise<FileMetadata> {
         const handle = await this.getHandle();
+        await this.ensurePermission(handle, 'read');
         const file = await handle.getFile();
         return {
             lastModified: new Date(file.lastModified).toISOString(),
@@ -144,11 +165,7 @@ export class LocalFileProvider implements FileProvider {
         if ((await handle.queryPermission(opts)) === 'granted') {
             return;
         }
-        // Within session, typically no fresh prompt if already granted; browser requires new gesture only after permission lapses.
-        const result = await handle.requestPermission(opts);
-        if (result !== 'granted') {
-            throw new Error('file permission was not granted');
-        }
+        throw new Error('file permission needs to be granted from the Popup or Options page before unlocking');
     }
 }
 

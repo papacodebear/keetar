@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { ByteUtils, estimatePasswordEntropy } from '@keetar/core';
 import { sendToBackground } from '../../background/message-bus';
 import { EntryIcon } from '../shared/EntryIcon';
+import { VaultProviderIcon } from '../shared/VaultProviderIcon';
 import { buildAiSortExport, diffAiSortAssignments, parseAiSortResponse } from './ai-sort';
 import { getSortedEntryUuids, markEntriesSorted } from './ai-sort-tracker';
 import { connectGoogleDrive, getAccessToken, GoogleDriveProvider } from '../../providers/gdrive';
 import { showDrivePicker } from '../../providers/gdrive-picker';
 import { clearConfiguredVault, getConfiguredVault } from '../../config/vault-config';
+import type { VaultBackend } from '../../config/vault-config';
 import type { AiSortDiff } from './ai-sort';
 import type {
     CombineConflict,
@@ -38,6 +40,8 @@ type AppState =
           root: GroupNode;
           recycleBinGroupUuid: string | undefined;
           vaultUuid: string | undefined;
+          vaultName: string | undefined;
+          vaultProvider: VaultBackend | undefined;
           selectedGroupUuid: string;
           selectedEntryUuid?: string;
       };
@@ -76,6 +80,8 @@ export function App() {
             root: response.root,
             recycleBinGroupUuid: response.recycleBinGroupUuid,
             vaultUuid: configured?.uuid,
+            vaultName: configured?.name,
+            vaultProvider: configured?.provider,
             selectedGroupUuid: keepSelection?.groupUuid ?? response.root.uuid,
             selectedEntryUuid: keepSelection?.entryUuid
         });
@@ -106,6 +112,8 @@ export function App() {
             root={state.root}
             recycleBinGroupUuid={state.recycleBinGroupUuid}
             vaultUuid={state.vaultUuid}
+            vaultName={state.vaultName}
+            vaultProvider={state.vaultProvider}
             selectedGroupUuid={state.selectedGroupUuid}
             selectedEntryUuid={state.selectedEntryUuid}
             onReload={reloadTree}
@@ -117,6 +125,8 @@ function Ready({
     root,
     recycleBinGroupUuid,
     vaultUuid,
+    vaultName,
+    vaultProvider,
     selectedGroupUuid,
     selectedEntryUuid,
     onReload
@@ -124,6 +134,8 @@ function Ready({
     root: GroupNode;
     recycleBinGroupUuid: string | undefined;
     vaultUuid: string | undefined;
+    vaultName: string | undefined;
+    vaultProvider: VaultBackend | undefined;
     selectedGroupUuid: string;
     selectedEntryUuid: string | undefined;
     onReload: (keepSelection?: { groupUuid: string; entryUuid?: string }) => Promise<void>;
@@ -318,6 +330,12 @@ function Ready({
     return (
         <div className="layout">
             <div className="tree-pane">
+                <div className="vault-badge">
+                    <VaultProviderIcon provider={vaultProvider} />
+                    <span className="vault-badge-text" title={vaultName}>
+                        {vaultName}
+                    </span>
+                </div>
                 <input
                     type="text"
                     className="entry-search"
@@ -532,15 +550,13 @@ function PasswordHealthPanel({
     onClose: () => void;
 }) {
     const [showDuplicateReview, setShowDuplicateReview] = useState(false);
-    const [keptEntryUuids, setKeptEntryUuids] = useState<Record<string, string>>({});
+    const [keptEntryUuids, setKeptEntryUuids] = useState<Set<string>>(() => new Set());
     const [removingDuplicates, setRemovingDuplicates] = useState(false);
     const [duplicateError, setDuplicateError] = useState<string | undefined>(undefined);
     const duplicateEntryCount = duplicateGroups.reduce((count, group) => count + group.entries.length - 1, 0);
 
     useEffect(() => {
-        setKeptEntryUuids(
-            Object.fromEntries(duplicateGroups.map((group) => [duplicateGroupId(group), group.entries[0]?.uuid ?? '']))
-        );
+        setKeptEntryUuids(new Set(duplicateGroups.flatMap((group) => group.entries.slice(0, 1).map((entry) => entry.uuid))));
         setShowDuplicateReview(false);
         setDuplicateError(undefined);
     }, [duplicateGroups]);
@@ -551,7 +567,7 @@ function PasswordHealthPanel({
         try {
             const response = await sendToBackground({
                 type: 'REMOVE_DUPLICATE_ENTRIES',
-                keepEntryUuids: Object.values(keptEntryUuids)
+                keepEntryUuids: Array.from(keptEntryUuids)
             });
             if (!response.ok || response.type !== 'REMOVE_DUPLICATE_ENTRIES') {
                 setDuplicateError(!response.ok ? response.error : 'Could not remove duplicate entries.');
@@ -585,17 +601,29 @@ function PasswordHealthPanel({
                                 const groupId = duplicateGroupId(group);
                                 return (
                                     <fieldset key={groupId} className="field">
-                                        <legend>Keep one entry</legend>
+                                        <legend>Keep entries</legend>
                                         <ul className="health-list">
                                             {group.entries.map((entry) => (
                                                 <li key={entry.uuid} className="health-row">
                                                     <label>
                                                         <input
-                                                            type="radio"
-                                                            name={groupId}
-                                                            checked={keptEntryUuids[groupId] === entry.uuid}
+                                                            type="checkbox"
+                                                            checked={keptEntryUuids.has(entry.uuid)}
+                                                            disabled={
+                                                                keptEntryUuids.has(entry.uuid) &&
+                                                                group.entries.filter((candidate) => keptEntryUuids.has(candidate.uuid))
+                                                                    .length === 1
+                                                            }
                                                             onChange={() =>
-                                                                setKeptEntryUuids((kept) => ({ ...kept, [groupId]: entry.uuid }))
+                                                                setKeptEntryUuids((kept) => {
+                                                                    const next = new Set(kept);
+                                                                    if (next.has(entry.uuid)) {
+                                                                        next.delete(entry.uuid);
+                                                                    } else {
+                                                                        next.add(entry.uuid);
+                                                                    }
+                                                                    return next;
+                                                                })
                                                             }
                                                         />{' '}
                                                         {entry.groupPath}: {entry.title || '(no title)'}

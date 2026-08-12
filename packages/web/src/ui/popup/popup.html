@@ -22,8 +22,14 @@
         padding-bottom: 0.4rem;
         border-bottom: 1px solid rgba(127, 127, 127, 0.3);
       }
+      .vault-provider-icon { width: 20px; height: 20px; flex-shrink: 0; }
       .vault-status-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
       .vault-status-matches { color: #666; font-size: 0.9em; flex-shrink: 0; }
+      .login-prompt { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.55rem; border: 1px solid rgba(60, 130, 246, 0.45); border-radius: 6px; background: rgba(60, 130, 246, 0.08); }
+      .login-prompt-detail, .login-prompt-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .login-prompt-detail { font-size: 0.9em; }
+      .login-prompt-url { color: #666; font-size: 0.8em; }
+      .login-prompt-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
       .view-all-button { align-self: flex-start; }
       .gear-button, .disconnect-button, .lock-button {
         flex-shrink: 0;

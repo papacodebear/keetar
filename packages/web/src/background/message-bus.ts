@@ -22,6 +22,14 @@ export interface PageEntryMatch {
     title: string;
 }
 
+export interface PendingLoginPrompt {
+    kind: 'save' | 'update';
+    title: string;
+    url: string;
+    username: string;
+    updateCandidates: { uuid: string; title: string }[];
+}
+
 export type KeetarRequest =
     | { type: 'UNLOCK_VAULT'; uuid: string; password: string }
     // Biometric unlock with pre-unwrapped hash (§6.2); use base64 for JSON-ifiable payload.
@@ -36,6 +44,9 @@ export type KeetarRequest =
     | { type: 'GET_PASSWORD_HEALTH' }
     | { type: 'GET_DUPLICATE_CREDENTIAL_GROUPS' }
     | { type: 'REMOVE_DUPLICATE_ENTRIES'; keepEntryUuids: string[] }
+    | { type: 'CAPTURE_LOGIN_CREDENTIALS'; title: string; url: string; username?: string; password?: string }
+    | { type: 'GET_PENDING_LOGIN_PROMPT'; tabId: number }
+    | { type: 'APPLY_PENDING_LOGIN_PROMPT'; tabId: number; action: 'save' | 'update' | 'dismiss'; entryUuid?: string }
     | { type: 'LOGIN_FORM_DETECTED' }
     | { type: 'GET_PAGE_ENTRY_MATCHES' }
     | { type: 'FILL_PAGE_ENTRY'; entryUuid: string }
@@ -83,6 +94,9 @@ export type KeetarResponse =
     | { ok: true; type: 'GET_PASSWORD_HEALTH'; report: PasswordHealthReport }
     | { ok: true; type: 'GET_DUPLICATE_CREDENTIAL_GROUPS'; groups: DuplicateCredentialGroup[] }
     | { ok: true; type: 'REMOVE_DUPLICATE_ENTRIES'; removed: number }
+    | { ok: true; type: 'CAPTURE_LOGIN_CREDENTIALS' }
+    | { ok: true; type: 'GET_PENDING_LOGIN_PROMPT'; prompt: PendingLoginPrompt | undefined }
+    | { ok: true; type: 'APPLY_PENDING_LOGIN_PROMPT' }
     | { ok: true; type: 'LOGIN_FORM_DETECTED' }
     | { ok: true; type: 'GET_PAGE_ENTRY_MATCHES'; matches: PageEntryMatch[] }
     | { ok: true; type: 'FILL_PAGE_ENTRY' }

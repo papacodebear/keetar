@@ -16,31 +16,100 @@ export interface ExactDuplicateGroup {
     entries: IdentifiedRecord[];
 }
 
-function exactCredentialKey(record: VaultEntryRecord): string | undefined {
-    const username = record.username.trim();
+/**
+ * Produces a stable identity for an in-vault credential duplicate.
+ *
+ * Username comparison is case-insensitive, while passwords remain exact. URLs
+ * are reduced to their host, so harmless presentation differences (scheme,
+ * `www.`, port, path, query string, and fragment) do not hide a duplicate.
+ * Different hosts remain distinct. Sparse entries without a complete
+ * username-and-host identity fall back to their normalized title and password.
+ */
+function duplicateCredentialKey(record: VaultEntryRecord): string | undefined {
+    const username = record.username.trim().toLowerCase();
     const password = record.password;
-    const url = record.url.trim();
-    if (!username || !password || !url) {
+    if (!password) {
         return undefined;
     }
-    return `${username}\u0000${password}\u0000${url}`;
+
+    const hostname = normalizeCredentialUrl(record.url);
+    if (username && hostname) {
+        return `credentials\u0000${username}\u0000${password}\u0000${hostname}`;
+    }
+
+    const title = record.title.trim().toLowerCase();
+    return title ? `title-password\u0000${title}\u0000${password}` : undefined;
 }
 
-/** Finds exact credential duplicates inside one vault. Group paths intentionally do not affect identity. */
-export function findExactDuplicateGroups(records: IdentifiedRecord[]): ExactDuplicateGroup[] {
-    const byKey = new Map<string, IdentifiedRecord[]>();
+function normalizeCredentialUrl(value: string): string | undefined {
+    const url = value.trim();
+    if (!url) {
+        return undefined;
+    }
+
+    try {
+        const parsed = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(url) ? url : `https://${url}`);
+        if (!parsed.hostname) {
+            return url;
+        }
+        return parsed.hostname.replace(/^www\./i, '');
+    } catch {
+        // Keep malformed but non-empty URLs matchable only by their literal value.
+        return url;
+    }
+}
+
+function groupRecordsByKey(
+    records: IdentifiedRecord[],
+    keyForRecord: (record: IdentifiedRecord) => string | undefined
+): Map<string, IdentifiedRecord[]> {
+    const groups = new Map<string, IdentifiedRecord[]>();
     for (const record of records) {
-        const key = exactCredentialKey(record);
+        const key = keyForRecord(record);
         if (!key) {
             continue;
         }
-        const entries = byKey.get(key) ?? [];
-        entries.push(record);
-        byKey.set(key, entries);
+        const entries = groups.get(key);
+        if (entries) {
+            entries.push(record);
+        } else {
+            groups.set(key, [record]);
+        }
     }
-    return Array.from(byKey.values())
+    return groups;
+}
+
+/** Finds equivalent credential duplicates inside one vault. Group paths intentionally do not affect identity. */
+export function findExactDuplicateGroups(records: IdentifiedRecord[]): ExactDuplicateGroup[] {
+    return Array.from(groupRecordsByKey(records, duplicateCredentialKey).values())
         .filter((entries) => entries.length > 1)
         .map((entries) => ({ entries }));
+}
+
+/**
+ * Returns the entries to move to the recycle bin after the user reviews each
+ * duplicate group. Multiple entries may be retained, but every group must
+ * retain at least one entry.
+ */
+export function entriesToRemoveFromDuplicateGroups(
+    groups: ExactDuplicateGroup[],
+    keepEntryUuids: Iterable<string>
+): IdentifiedRecord[] {
+    const keptUuids = new Set(keepEntryUuids);
+    const duplicateUuids = new Set(groups.flatMap((group) => group.entries.map((entry) => entry.uuid)));
+    if (Array.from(keptUuids).some((uuid) => !duplicateUuids.has(uuid))) {
+        throw new Error('choose only entries from the current duplicate sets');
+    }
+
+    const entriesToRemove: IdentifiedRecord[] = [];
+    for (const group of groups) {
+        const keptEntries = group.entries.filter((entry) => keptUuids.has(entry.uuid));
+        if (keptEntries.length === 0) {
+            throw new Error('keep at least one entry from each duplicate set');
+        }
+        entriesToRemove.push(...group.entries.filter((entry) => !keptUuids.has(entry.uuid)));
+    }
+    return entriesToRemove;
 }
 
 /** Incoming records whose complete credentials already exist in the primary vault. */
@@ -48,17 +117,11 @@ export function findExactDuplicateMatches(
     primary: IdentifiedRecord[],
     secondary: IdentifiedRecord[]
 ): { primary: IdentifiedRecord; secondary: IdentifiedRecord }[] {
-    const primaryByKey = new Map<string, IdentifiedRecord>();
-    for (const record of primary) {
-        const key = exactCredentialKey(record);
-        if (key && !primaryByKey.has(key)) {
-            primaryByKey.set(key, record);
-        }
-    }
+    const primaryByKey = groupRecordsByKey(primary, duplicateCredentialKey);
     const matches: { primary: IdentifiedRecord; secondary: IdentifiedRecord }[] = [];
     for (const record of secondary) {
-        const key = exactCredentialKey(record);
-        const primaryRecord = key ? primaryByKey.get(key) : undefined;
+        const key = duplicateCredentialKey(record);
+        const primaryRecord = key ? primaryByKey.get(key)?.[0] : undefined;
         if (primaryRecord) {
             matches.push({ primary: primaryRecord, secondary: record });
         }

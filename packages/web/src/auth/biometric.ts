@@ -7,7 +7,7 @@ import {
     removeBiometricRecord,
     saveBiometricRecord
 } from './biometric-store';
-import { LocalFileProvider } from '../providers/local-file';
+import { ensureVaultFilePermission, LocalFileProvider } from '../providers/local-file';
 
 // Enroll + unlock orchestration; enrollment is scoped, ephemeral (§6.2, §8.1).
 
@@ -17,6 +17,7 @@ export async function isBiometricEnrolled(vaultUuid: string): Promise<boolean> {
 
 export async function enroll(vaultUuid: string, password: string): Promise<void> {
     // Verify password before enrolling; typo fails now, not at first unlock (§6.2).
+    await ensureVaultFilePermission(vaultUuid);
     const provider = new LocalFileProvider(vaultUuid);
     const data = await provider.read('');
     const credentials = new KdbxCredentials(ProtectedValue.fromString(password));

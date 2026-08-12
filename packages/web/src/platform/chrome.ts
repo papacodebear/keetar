@@ -13,6 +13,20 @@ export const storage = {
     }
 };
 
+// Session storage survives an MV3 service-worker restart but is never written to disk.
+export const sessionStorage = {
+    async get<T>(key: string): Promise<T | undefined> {
+        const result = await chrome.storage.session.get(key);
+        return result[key] as T | undefined;
+    },
+    async set(key: string, value: unknown): Promise<void> {
+        await chrome.storage.session.set({ [key]: value });
+    },
+    async remove(key: string): Promise<void> {
+        await chrome.storage.session.remove(key);
+    }
+};
+
 export const idle = {
     setDetectionInterval(seconds: number): void {
         chrome.idle.setDetectionInterval(seconds);
@@ -45,6 +59,9 @@ export const tabs = {
     },
     sendMessage(tabId: number, message: unknown): Promise<void> {
         return chrome.tabs.sendMessage(tabId, message);
+    },
+    onRemoved(callback: (tabId: number) => void): void {
+        chrome.tabs.onRemoved.addListener(callback);
     }
 };
 
@@ -60,7 +77,10 @@ export const identity = {
 
 // MV3 action.setBadgeText; Firefox MV2 uses browserAction (§5.1, §9.1).
 export const action = {
-    setBadgeText(details: { tabId: number; text: string }): void {
-        void chrome.action.setBadgeText(details);
+    setBadgeText(details: { tabId: number; text: string }): Promise<void> {
+        return chrome.action.setBadgeText(details);
+    },
+    setBadgeBackgroundColor(details: { tabId: number; color: string }): Promise<void> {
+        return chrome.action.setBadgeBackgroundColor(details);
     }
 };

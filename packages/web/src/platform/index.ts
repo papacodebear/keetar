@@ -6,6 +6,6 @@ const isChrome = !navigator.userAgent.includes('Firefox/');
 
 const platform = isChrome ? chromePlatform : firefoxPlatform;
 
-export const { storage, idle, alarms, identity, action, runtime, tabs } = platform;
+export const { storage, sessionStorage, idle, alarms, identity, action, runtime, tabs } = platform;
 // Exported for gdrive-picker.ts: Chrome uses extension:// origin, Firefox uses bridge iframe (§7.3).
 export { isChrome };

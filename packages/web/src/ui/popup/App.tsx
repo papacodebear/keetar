@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ByteUtils } from '@keetar/core';
-import { sendToBackground } from '../../background/message-bus';
+import { sendToBackground, type PendingLoginPrompt } from '../../background/message-bus';
 import type { EntryFieldName, EntrySummary } from '../../background/vault-session';
 import {
     clearConfiguredVault,
@@ -11,7 +11,9 @@ import type { ContentScriptMessage, FillCredentialsMessage } from '../../autofil
 import { isBiometricEnrolled, unlockToPasswordHash } from '../../auth/biometric';
 import { isWebAuthnSupported } from '../../auth/webauthn';
 import { EntryIcon } from '../shared/EntryIcon';
+import { VaultProviderIcon } from '../shared/VaultProviderIcon';
 import { tabs } from '../../platform';
+import { ensureVaultFilePermission } from '../../providers/local-file';
 
 // Quick access post-unlock: search, copy, fill (§8.1–8.2); also runs WebAuthn unlock ceremony (§6.2).
 
@@ -34,6 +36,8 @@ type ViewState =
           vaultProvider: VaultBackend;
           entries: EntrySummary[];
           matchedUuids: Set<string>;
+          pendingLoginPrompt: PendingLoginPrompt | undefined;
+          activeTabId: number | undefined;
       };
 
 export function App() {
@@ -80,12 +84,22 @@ export function App() {
         }
         const configured = await getConfiguredVault();
         const matchedUuids = await matchActiveTab();
+        const [tab] = await tabs.query({ active: true, currentWindow: true });
+        const pendingResponse =
+            tab?.id === undefined
+                ? undefined
+                : await sendToBackground({ type: 'GET_PENDING_LOGIN_PROMPT', tabId: tab.id });
         setView({
             kind: 'unlocked',
             vaultName: configured?.name ?? '',
             vaultProvider: configured?.provider ?? 'local-file',
             entries: response.entries,
-            matchedUuids
+            matchedUuids,
+            pendingLoginPrompt:
+                pendingResponse?.ok && pendingResponse.type === 'GET_PENDING_LOGIN_PROMPT'
+                    ? pendingResponse.prompt
+                    : undefined,
+            activeTabId: tab?.id
         });
     }
 
@@ -100,35 +114,36 @@ export function App() {
         setView({ kind: 'locked', vaultUuid, vaultName, vaultProvider, biometricEnrolled, error, code });
     }
 
-    async function handleUnlock(password: string): Promise<void> {
-        const configured = await getConfiguredVault();
-        if (!configured) {
-            setView({ kind: 'no-vault' });
-            return;
-        }
+    async function handleUnlock(
+        password: string,
+        vaultUuid: string,
+        vaultName: string,
+        vaultProvider: VaultBackend
+    ): Promise<void> {
         try {
+            if (vaultProvider === 'local-file') {
+                await ensureVaultFilePermission(vaultUuid);
+            }
             const response = await sendToBackground({
                 type: 'UNLOCK_VAULT',
-                uuid: configured.uuid,
+                uuid: vaultUuid,
                 password
             });
             if (response.ok) {
                 await loadEntries();
             } else {
-                await lockedError(configured.uuid, configured.name, configured.provider, response.error, response.code);
+                await lockedError(vaultUuid, vaultName, vaultProvider, response.error, response.code);
             }
         } catch (e) {
-            await lockedError(
-                configured.uuid,
-                configured.name,
-                configured.provider,
-                e instanceof Error ? e.message : String(e)
-            );
+            await lockedError(vaultUuid, vaultName, vaultProvider, e instanceof Error ? e.message : String(e));
         }
     }
 
     async function handleBiometricUnlock(vaultUuid: string, vaultName: string, vaultProvider: VaultBackend): Promise<void> {
         try {
+            if (vaultProvider === 'local-file') {
+                await ensureVaultFilePermission(vaultUuid);
+            }
             const passwordHash = await unlockToPasswordHash(vaultUuid);
             const response = await sendToBackground({
                 type: 'UNLOCK_VAULT_WITH_HASH',
@@ -179,7 +194,7 @@ export function App() {
                     biometricEnrolled={view.biometricEnrolled}
                     error={view.error}
                     code={view.code}
-                    onUnlock={handleUnlock}
+                    onUnlock={(password) => handleUnlock(password, view.vaultUuid, view.vaultName, view.vaultProvider)}
                     onBiometricUnlock={() => handleBiometricUnlock(view.vaultUuid, view.vaultName, view.vaultProvider)}
                     onDisconnect={handleDisconnect}
                 />
@@ -191,6 +206,9 @@ export function App() {
                     vaultProvider={view.vaultProvider}
                     entries={view.entries}
                     matchedUuids={view.matchedUuids}
+                    pendingLoginPrompt={view.pendingLoginPrompt}
+                    activeTabId={view.activeTabId}
+                    onLoginPromptHandled={loadEntries}
                     onLock={handleLock}
                     onDisconnect={handleDisconnect}
                 />
@@ -232,9 +250,8 @@ function VaultStatusHeader({
 }) {
     return (
         <div className="vault-status">
-            <span className="vault-status-name">
-                {vaultProvider === 'gdrive' ? 'Google Drive' : 'Local'}: {vaultName}
-            </span>
+            <VaultProviderIcon provider={vaultProvider} />
+            <span className="vault-status-name">{vaultName}</span>
             {matchCount !== undefined && (
                 <span className="vault-status-matches">
                     {matchCount} {matchCount === 1 ? 'match' : 'matches'} on this page
@@ -403,6 +420,9 @@ function UnlockedView({
     vaultProvider,
     entries,
     matchedUuids,
+    pendingLoginPrompt,
+    activeTabId,
+    onLoginPromptHandled,
     onLock,
     onDisconnect
 }: {
@@ -410,6 +430,9 @@ function UnlockedView({
     vaultProvider: VaultBackend;
     entries: EntrySummary[];
     matchedUuids: Set<string>;
+    pendingLoginPrompt: PendingLoginPrompt | undefined;
+    activeTabId: number | undefined;
+    onLoginPromptHandled: () => Promise<void>;
     onLock: () => Promise<void>;
     onDisconnect: () => Promise<void>;
 }) {
@@ -480,11 +503,20 @@ function UnlockedView({
                 onLock={onLock}
                 onDisconnect={onDisconnect}
             />
-            <div className="toolbar">
-                <button type="button" onClick={() => void redetectFields()} title="Detect login fields on this page">
-                    Detect fields
-                </button>
-            </div>
+            {pendingLoginPrompt && activeTabId !== undefined && (
+                <PendingLoginPromptCard
+                    prompt={pendingLoginPrompt}
+                    tabId={activeTabId}
+                    onHandled={onLoginPromptHandled}
+                />
+            )}
+            {matchedUuids.size > 0 && (
+                <div className="toolbar">
+                    <button type="button" onClick={() => void redetectFields()} title="Detect login fields on this page">
+                        Detect fields
+                    </button>
+                </div>
+            )}
             <button type="button" className="view-all-button" onClick={openManager}>
                 View all entries &amp; groups
             </button>
@@ -522,6 +554,71 @@ function UnlockedView({
                 ))}
                 {matchedEntries.length === 0 && <li className="empty">No entries match this page.</li>}
             </ul>
+        </div>
+    );
+}
+
+function PendingLoginPromptCard({
+    prompt,
+    tabId,
+    onHandled
+}: {
+    prompt: PendingLoginPrompt;
+    tabId: number;
+    onHandled: () => Promise<void>;
+}) {
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | undefined>(undefined);
+
+    async function apply(action: 'save' | 'update' | 'dismiss', entryUuid?: string): Promise<void> {
+        setBusy(true);
+        setError(undefined);
+        try {
+            const response = await sendToBackground({
+                type: 'APPLY_PENDING_LOGIN_PROMPT',
+                tabId,
+                action,
+                entryUuid
+            });
+            if (!response.ok) {
+                setError(response.error);
+                return;
+            }
+            await onHandled();
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    return (
+        <div className="login-prompt">
+            <strong>{prompt.kind === 'save' ? 'Save login?' : 'Update saved login?'}</strong>
+            <span className="login-prompt-detail">
+                {prompt.title} · {prompt.username}
+            </span>
+            <span className="login-prompt-url">{prompt.url}</span>
+            <div className="login-prompt-actions">
+                {prompt.kind === 'save' ? (
+                    <button type="button" disabled={busy} onClick={() => void apply('save')}>
+                        Save
+                    </button>
+                ) : (
+                    prompt.updateCandidates.map((entry) => (
+                        <button
+                            key={entry.uuid}
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void apply('update', entry.uuid)}
+                        >
+                            Update {entry.title || '(no title)'}
+                        </button>
+                    ))
+                )}
+                <button type="button" disabled={busy} onClick={() => void apply('dismiss')}>
+                    Not now
+                </button>
+            </div>
+            {error && <p className="error">{error}</p>}
         </div>
     );
 }

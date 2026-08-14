@@ -26,7 +26,7 @@ export interface PendingLoginPrompt {
     kind: 'save' | 'update';
     title: string;
     url: string;
-    username: string;
+    username: string | undefined;
     updateCandidates: { uuid: string; title: string }[];
 }
 
@@ -44,7 +44,15 @@ export type KeetarRequest =
     | { type: 'GET_PASSWORD_HEALTH' }
     | { type: 'GET_DUPLICATE_CREDENTIAL_GROUPS' }
     | { type: 'REMOVE_DUPLICATE_ENTRIES'; keepEntryUuids: string[] }
-    | { type: 'CAPTURE_LOGIN_CREDENTIALS'; title: string; url: string; username?: string; password?: string }
+    | {
+          type: 'CAPTURE_LOGIN_CREDENTIALS';
+          title: string;
+          url: string;
+          username?: string;
+          password?: string;
+          passwordCandidates?: string[];
+      }
+    | { type: 'CAPTURE_GENERATED_PASSWORD'; password: string }
     | { type: 'GET_PENDING_LOGIN_PROMPT'; tabId: number }
     | { type: 'APPLY_PENDING_LOGIN_PROMPT'; tabId: number; action: 'save' | 'update' | 'dismiss'; entryUuid?: string }
     | { type: 'LOGIN_FORM_DETECTED' }
@@ -95,6 +103,7 @@ export type KeetarResponse =
     | { ok: true; type: 'GET_DUPLICATE_CREDENTIAL_GROUPS'; groups: DuplicateCredentialGroup[] }
     | { ok: true; type: 'REMOVE_DUPLICATE_ENTRIES'; removed: number }
     | { ok: true; type: 'CAPTURE_LOGIN_CREDENTIALS' }
+    | { ok: true; type: 'CAPTURE_GENERATED_PASSWORD' }
     | { ok: true; type: 'GET_PENDING_LOGIN_PROMPT'; prompt: PendingLoginPrompt | undefined }
     | { ok: true; type: 'APPLY_PENDING_LOGIN_PROMPT' }
     | { ok: true; type: 'LOGIN_FORM_DETECTED' }

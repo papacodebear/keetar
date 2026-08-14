@@ -2,7 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Keetar — Manager</title>
+    <title>Keetar</title>
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/keetar-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/keetar-32.png" />
     <style>
       :root { color-scheme: light dark; }
       * { box-sizing: border-box; }
@@ -15,12 +17,14 @@
       }
       .layout { display: flex; height: 100vh; }
       .tree-pane {
-        width: 240px;
+        width: 300px;
         flex-shrink: 0;
         border-right: 1px solid #ddd;
         overflow-y: auto;
         padding: 0.5rem;
+        position: relative;
       }
+      .tree-pane-watermark { position: absolute; left: 50%; bottom: 1rem; width: 230px; height: auto; transform: translateX(-50%); opacity: 0.08; z-index: -1; pointer-events: none; }
       .vault-badge {
         display: flex;
         align-items: center;
@@ -32,9 +36,10 @@
       }
       .vault-provider-icon { width: 20px; height: 20px; flex-shrink: 0; }
       .vault-badge-text { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-      .tree-pane-toolbar { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-bottom: 0.5rem; }
+      .vault-badge-actions { display: flex; gap: 0.2rem; flex-shrink: 0; }
+      .tree-pane-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; margin-bottom: 0.5rem; }
       .tree-pane-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
-      .icon-button { padding: 0.3rem 0.45rem; font-size: 15px; line-height: 1; margin-right: 0; }
+      .icon-button { padding: 0.11rem 0.385rem; font-size: 16.5px; line-height: 1; margin-right: 0; }
       .tree-node { user-select: none; }
       .tree-node-label {
         display: flex;
@@ -54,7 +59,7 @@
       .tree-children { margin-left: 1rem; }
       .tree-separator { border: none; border-top: 1px solid rgba(127, 127, 127, 0.3); margin: 0.4rem 0.4rem 0.4rem 0; }
       .middle-pane {
-        width: 280px;
+        width: 320px;
         flex-shrink: 0;
         border-right: 1px solid #ddd;
         overflow-y: auto;
@@ -62,7 +67,7 @@
         flex-direction: column;
       }
       .middle-pane-header { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; border-bottom: 1px solid #eee; }
-      .entry-search { display: block; width: 100%; box-sizing: border-box; margin: 0.5rem; padding: 0.4rem; font-size: 13px; }
+      .entry-search { display: block; width: 100%; box-sizing: border-box; margin: 0.5rem 0; padding: 0.4rem; font-size: 13px; }
       .entry-row {
         display: flex;
         flex-direction: row;
@@ -77,6 +82,7 @@
       .entry-row-text { min-width: 0; overflow: hidden; }
       .entry-row-title { font-weight: 600; }
       .entry-row-username { color: #666; font-size: 0.9em; }
+      .entry-row-health { color: #a06a00; font-size: 0.85em; white-space: normal; word-break: break-word; }
       .entry-icon { flex-shrink: 0; border-radius: 3px; object-fit: contain; }
       .entry-icon-fallback { display: inline-block; border-radius: 50%; background: rgba(127, 127, 127, 0.3); }
       .entry-detail-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
@@ -94,13 +100,40 @@
       .url-row { display: flex; gap: 0.35rem; }
       .url-row input { min-width: 0; flex: 1; }
       .field textarea { resize: vertical; min-height: 4em; }
-      .password-row { display: flex; gap: 0.25rem; }
+      .password-row { display: flex; gap: 0.25rem; position: relative; }
       .password-row input { flex: 1; }
       .password-strength { color: #666; font-size: 0.85em; margin-top: 0.25rem; }
+      .password-generator-popover {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        z-index: 10;
+        margin-top: 0.25rem;
+        width: 260px;
+        padding: 0.6rem;
+        background: Canvas;
+        border: 1px solid rgba(127, 127, 127, 0.4);
+        border-radius: 6px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+      }
+      .password-generator-panel { display: flex; flex-direction: column; gap: 0.5rem; }
+      .password-generator-mode { display: flex; gap: 0.25rem; }
+      .password-generator-mode button.selected { background: rgba(60, 130, 246, 0.18); }
+      .password-generator-value-row { display: flex; gap: 0.25rem; }
+      .password-generator-value-row input { flex: 1; font-family: monospace; }
+      .password-generator-copy-button { display: inline-flex; align-items: center; justify-content: center; }
+      .password-generator-error { color: #c00; font-size: 0.85em; margin: 0; }
+      .password-generator-options { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85em; }
+      .password-generator-options label { display: flex; align-items: center; gap: 0.35rem; }
+      .password-generator-options input[type='number'] { width: 4.5rem; }
+      .password-generator-options input:disabled { opacity: 0.5; }
+      .password-generator-symbols-row { display: flex; align-items: center; gap: 0.35rem; }
+      .password-generator-symbols-row label { flex-shrink: 0; }
+      .password-generator-symbols-row input[type='text'] { flex: 1; min-width: 0; }
+      .password-generator-footer { display: flex; gap: 0.35rem; }
       .attachments { margin-top: 1rem; }
       .attachment-row { display: flex; justify-content: space-between; align-items: center; padding: 0.25rem 0; }
       button { font-size: 12px; padding: 0.3rem 0.6rem; cursor: pointer; }
-      .icon-button { padding: 0.1rem 0.35rem; }
       .danger { color: #c00; }
       .empty-state { color: #666; padding: 1rem; }
       .save-indicator { color: #2a7a2a; font-size: 0.85em; }

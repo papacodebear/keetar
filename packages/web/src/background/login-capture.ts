@@ -4,6 +4,8 @@ export interface CapturedLogin {
     url: string;
     username?: string;
     password?: string;
+    /** Every password-type field's value in the submitted form — used to spot a Keetar-generated password. */
+    passwordCandidates?: string[];
 }
 
 /** Merge consecutive steps in a login flow without replacing a populated value with an empty field. */
@@ -12,7 +14,8 @@ export function mergeCapturedLogin(previous: CapturedLogin | undefined, incoming
         title: previous?.title || incoming.title,
         url: previous?.url || incoming.url,
         username: incoming.username || previous?.username,
-        password: incoming.password || previous?.password
+        password: incoming.password || previous?.password,
+        passwordCandidates: [...(previous?.passwordCandidates ?? []), ...(incoming.passwordCandidates ?? [])]
     };
 }
 

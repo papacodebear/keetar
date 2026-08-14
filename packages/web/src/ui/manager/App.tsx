@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ByteUtils, estimatePasswordEntropy } from '@keetar/core';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ByteUtils, estimatePasswordEntropy, type PasswordHealthFinding } from '@keetar/core';
 import { sendToBackground } from '../../background/message-bus';
 import { EntryIcon } from '../shared/EntryIcon';
 import { VaultProviderIcon } from '../shared/VaultProviderIcon';
+import { PasswordGeneratorPanel } from '../shared/PasswordGeneratorPanel';
+import { PianoKeysWatermark } from '../shared/PianoKeysWatermark';
 import { buildAiSortExport, diffAiSortAssignments, parseAiSortResponse } from './ai-sort';
 import { getSortedEntryUuids, markEntriesSorted } from './ai-sort-tracker';
 import { connectGoogleDrive, getAccessToken, GoogleDriveProvider } from '../../providers/gdrive';
@@ -176,11 +178,25 @@ function Ready({
             });
         }, 150);
         return () => clearTimeout(handle);
-    }, [search]);
+        // root also triggers a re-search: it's a fresh object after every mutation (delete, edit, move, ...),
+        // so this keeps results in sync instead of showing a stale pre-mutation snapshot.
+    }, [search, root]);
 
     const displayedEntries = sortByName(searchResults ?? selectedGroup.entries, (entry) => entry.title);
+    const allEntries = flattenEntries(root);
+    const healthFindingEntries = healthReport
+        ? sortByName(
+              healthReport.findings
+                  .map((finding) => ({ finding, entry: allEntries.find((e) => e.uuid === finding.entryUuid) }))
+                  .filter((x): x is { finding: PasswordHealthFinding; entry: EntrySummary } => !!x.entry),
+              (x) => x.entry.title
+          )
+        : [];
 
     function selectGroup(groupUuid: string): void {
+        setHealthReport(undefined);
+        setDuplicateGroups(undefined);
+        setHealthError(undefined);
         void onReload({ groupUuid });
     }
 
@@ -191,6 +207,11 @@ function Ready({
         setShowImportExport(false);
         setShowCombine(false);
         setShowAiSort(false);
+        void onReload({ groupUuid: selectedGroupUuid, entryUuid });
+    }
+
+    // Health mode stays active across an entry selection — only the detail pane changes.
+    function selectHealthEntry(entryUuid: string): void {
         void onReload({ groupUuid: selectedGroupUuid, entryUuid });
     }
 
@@ -342,15 +363,27 @@ function Ready({
                     <span className="vault-badge-text" title={vaultName}>
                         {vaultName}
                     </span>
+                    <div className="vault-badge-actions">
+                        <button
+                            type="button"
+                            className="icon-button"
+                            title="Lock database"
+                            aria-label="Lock database"
+                            onClick={() => void lockVault()}
+                        >
+                            🔒
+                        </button>
+                        <button
+                            type="button"
+                            className="icon-button danger"
+                            title="Disconnect this database"
+                            aria-label="Disconnect this database"
+                            onClick={() => void disconnectVault()}
+                        >
+                            ✕
+                        </button>
+                    </div>
                 </div>
-                <input
-                    type="text"
-                    className="entry-search"
-                    placeholder="Search all entries"
-                    title="Searches title, username, URL, and password"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                />
                 <div className="tree-pane-toolbar">
                     <button
                         type="button"
@@ -383,8 +416,8 @@ function Ready({
                     <button
                         type="button"
                         className="icon-button"
-                        title="Organize with AI"
-                        aria-label="Organize with AI"
+                        title="Organize with your own AI"
+                        aria-label="Organize with your own AI"
                         onClick={toggleAiSort}
                     >
                         ✨
@@ -402,22 +435,21 @@ function Ready({
                     <button
                         type="button"
                         className="icon-button"
-                        title="Lock database"
-                        aria-label="Lock database"
-                        onClick={() => void lockVault()}
+                        title="Preferences"
+                        aria-label="Preferences"
+                        onClick={() => chrome.runtime.openOptionsPage()}
                     >
-                        🔒
-                    </button>
-                    <button
-                        type="button"
-                        className="icon-button danger"
-                        title="Disconnect this database"
-                        aria-label="Disconnect this database"
-                        onClick={() => void disconnectVault()}
-                    >
-                        ✕
+                        ⚙
                     </button>
                 </div>
+                <input
+                    type="text"
+                    className="entry-search"
+                    placeholder="Search all entries"
+                    title="Searches title, username, URL, and password"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                />
                 <div className="tree-pane-header">
                     <strong>Groups</strong>
                 </div>
@@ -429,7 +461,7 @@ function Ready({
                 <GroupTreeNode
                     node={root}
                     depth={0}
-                    selectedGroupUuid={selectedGroupUuid}
+                    selectedGroupUuid={healthReport ? undefined : selectedGroupUuid}
                     recycleBinGroupUuid={recycleBinGroupUuid}
                     onSelect={selectGroup}
                     onCreateChild={createGroup}
@@ -438,41 +470,72 @@ function Ready({
                     isInRecycleBin={false}
                     isRoot
                 />
+                <PianoKeysWatermark className="tree-pane-watermark" />
             </div>
             <div className="middle-pane">
-                <div className="middle-pane-header">
-                    <strong>{search.trim() ? `Search results (${displayedEntries.length})` : selectedGroup.name || 'Entries'}</strong>
-                    {!search.trim() && selectedGroupUuid === recycleBinGroupUuid ? (
-                        <button
-                            type="button"
-                            onClick={() => void emptyRecycleBin()}
-                            disabled={selectedGroup.entries.length === 0 && selectedGroup.groups.length === 0}
-                        >
-                            Empty Recycle Bin
-                        </button>
-                    ) : !selectedGroupIsInRecycleBin ? (
-                        <button type="button" onClick={() => void createEntry()}>
-                            + Entry
-                        </button>
-                    ) : null}
-                </div>
-                {displayedEntries.length === 0 && (
-                    <p className="empty-state">{search.trim() ? 'No matching entries.' : 'No entries in this group.'}</p>
-                )}
-                {displayedEntries.map((entry) => (
-                    <div
-                        key={entry.uuid}
-                        className={`entry-row${entry.uuid === selectedEntryUuid ? ' selected' : ''}`}
-                        onClick={() => selectEntry(entry.uuid)}
-                        onDoubleClick={() => openEntryUrl(entry.urls[0] ?? '')}
-                    >
-                        <EntryIcon entryUuid={entry.uuid} icon={entry.icon} hasCustomIcon={entry.hasCustomIcon} />
-                        <div className="entry-row-text">
-                            <div className="entry-row-title">{entry.title || '(no title)'}</div>
-                            <div className="entry-row-username">{entry.username}</div>
+                {healthReport ? (
+                    <PasswordHealthPanel
+                        report={healthReport}
+                        duplicateGroups={duplicateGroups ?? []}
+                        findingEntries={healthFindingEntries}
+                        selectedEntryUuid={selectedEntryUuid}
+                        onSelectEntry={selectHealthEntry}
+                        onDuplicatesRemoved={() => {
+                            void onReload({ groupUuid: selectedGroupUuid });
+                            void loadPasswordHealth();
+                        }}
+                        onClose={() => {
+                            setHealthReport(undefined);
+                            setDuplicateGroups(undefined);
+                        }}
+                    />
+                ) : healthError ? (
+                    <>
+                        <div className="middle-pane-header">
+                            <strong>Password health</strong>
+                            <button type="button" onClick={() => setHealthError(undefined)}>
+                                Close
+                            </button>
                         </div>
-                    </div>
-                ))}
+                        <p className="empty-state">{healthError}</p>
+                    </>
+                ) : (
+                    <>
+                        <div className="middle-pane-header">
+                            <strong>{search.trim() ? `Search results (${displayedEntries.length})` : selectedGroup.name || 'Entries'}</strong>
+                            {!search.trim() && selectedGroupUuid === recycleBinGroupUuid ? (
+                                <button
+                                    type="button"
+                                    onClick={() => void emptyRecycleBin()}
+                                    disabled={selectedGroup.entries.length === 0 && selectedGroup.groups.length === 0}
+                                >
+                                    Empty Recycle Bin
+                                </button>
+                            ) : !selectedGroupIsInRecycleBin ? (
+                                <button type="button" onClick={() => void createEntry()}>
+                                    + Entry
+                                </button>
+                            ) : null}
+                        </div>
+                        {displayedEntries.length === 0 && (
+                            <p className="empty-state">{search.trim() ? 'No matching entries.' : 'No entries in this group.'}</p>
+                        )}
+                        {displayedEntries.map((entry) => (
+                            <div
+                                key={entry.uuid}
+                                className={`entry-row${entry.uuid === selectedEntryUuid ? ' selected' : ''}`}
+                                onClick={() => selectEntry(entry.uuid)}
+                                onDoubleClick={() => openEntryUrl(entry.urls[0] ?? '')}
+                            >
+                                <EntryIcon entryUuid={entry.uuid} icon={entry.icon} hasCustomIcon={entry.hasCustomIcon} />
+                                <div className="entry-row-text">
+                                    <div className="entry-row-title">{entry.title || '(no title)'}</div>
+                                    <div className="entry-row-username">{entry.username}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </>
+                )}
             </div>
             <div className="detail-pane">
                 {showImportExport ? (
@@ -500,26 +563,6 @@ function Ready({
                         onApplied={() => void onReload({ groupUuid: selectedGroupUuid })}
                         onClose={() => setShowAiSort(false)}
                     />
-                ) : healthReport ? (
-                    <PasswordHealthPanel
-                        report={healthReport}
-                        duplicateGroups={duplicateGroups ?? []}
-                        onDuplicatesRemoved={() => {
-                            void onReload({ groupUuid: selectedGroupUuid });
-                            void loadPasswordHealth();
-                        }}
-                        onClose={() => {
-                            setHealthReport(undefined);
-                            setDuplicateGroups(undefined);
-                        }}
-                    />
-                ) : healthError ? (
-                    <div className="empty-state">
-                        <p>{healthError}</p>
-                        <button type="button" onClick={() => setHealthError(undefined)}>
-                            Close
-                        </button>
-                    </div>
                 ) : selectedEntryUuid ? (
                     <EntryDetailPanel
                         key={selectedEntryUuid}
@@ -527,10 +570,17 @@ function Ready({
                         root={root}
                         recycleBinGroupUuid={recycleBinGroupUuid}
                         onChanged={() => onReload({ groupUuid: selectedGroupUuid, entryUuid: selectedEntryUuid })}
-                        onDeleted={() => onReload({ groupUuid: selectedGroupUuid })}
+                        onDeleted={() => {
+                            void onReload({ groupUuid: selectedGroupUuid });
+                            if (healthReport) {
+                                void loadPasswordHealth();
+                            }
+                        }}
                     />
                 ) : (
-                    <p className="empty-state">Select an entry to view or edit it.</p>
+                    <p className="empty-state">
+                        {healthReport ? 'Select a flagged entry to view or edit it.' : 'Select an entry to view or edit it.'}
+                    </p>
                 )}
             </div>
         </div>
@@ -541,6 +591,19 @@ function titleFor(report: PasswordHealthReport, entryUuid: string): string {
     return report.findings.find((f) => f.entryUuid === entryUuid)?.title || '(no title)';
 }
 
+function describeFinding(finding: PasswordHealthFinding, report: PasswordHealthReport): string {
+    return [
+        finding.weak && `weak (${finding.entropy.toFixed(1)} bits)`,
+        finding.reused && 'reused',
+        finding.old && 'old',
+        finding.breachCount > 0 && `breached (${finding.breachCount})`,
+        finding.similarEntryUuids.length > 0 &&
+            `similar to ${finding.similarEntryUuids.map((uuid) => titleFor(report, uuid)).join(', ')}`
+    ]
+        .filter(Boolean)
+        .join(', ');
+}
+
 function duplicateGroupId(group: DuplicateCredentialGroup): string {
     return group.entries.map((entry) => entry.uuid).sort().join('|');
 }
@@ -548,11 +611,17 @@ function duplicateGroupId(group: DuplicateCredentialGroup): string {
 function PasswordHealthPanel({
     report,
     duplicateGroups,
+    findingEntries,
+    selectedEntryUuid,
+    onSelectEntry,
     onDuplicatesRemoved,
     onClose
 }: {
     report: PasswordHealthReport;
     duplicateGroups: DuplicateCredentialGroup[];
+    findingEntries: { finding: PasswordHealthFinding; entry: EntrySummary }[];
+    selectedEntryUuid: string | undefined;
+    onSelectEntry: (entryUuid: string) => void;
     onDuplicatesRemoved: () => void;
     onClose: () => void;
 }) {
@@ -653,30 +722,23 @@ function PasswordHealthPanel({
                 {report.total} entries: {report.weak} weak, {report.reused} reused, {report.old} old, {report.breached}{' '}
                 breached, {report.similar} similar to another entry.
             </p>
-            {report.findings.length === 0 ? (
+            {findingEntries.length === 0 ? (
                 <p className="empty-state">No password issues found.</p>
             ) : (
-                <ul className="health-list">
-                    {report.findings.map((finding) => (
-                        <li key={finding.entryUuid} className="health-row">
-                            <div className="entry-row-title">{finding.title || '(no title)'}</div>
-                            <div className="entry-row-username">
-                                {[
-                                    finding.weak && `weak (${finding.entropy.toFixed(1)} bits)`,
-                                    finding.reused && 'reused',
-                                    finding.old && 'old',
-                                    finding.breachCount > 0 && `breached (${finding.breachCount})`,
-                                    finding.similarEntryUuids.length > 0 &&
-                                        `similar to ${finding.similarEntryUuids
-                                            .map((uuid) => titleFor(report, uuid))
-                                            .join(', ')}`
-                                ]
-                                    .filter(Boolean)
-                                    .join(', ')}
-                            </div>
-                        </li>
-                    ))}
-                </ul>
+                findingEntries.map(({ finding, entry }) => (
+                    <div
+                        key={entry.uuid}
+                        className={`entry-row${entry.uuid === selectedEntryUuid ? ' selected' : ''}`}
+                        onClick={() => onSelectEntry(entry.uuid)}
+                    >
+                        <EntryIcon entryUuid={entry.uuid} icon={entry.icon} hasCustomIcon={entry.hasCustomIcon} />
+                        <div className="entry-row-text">
+                            <div className="entry-row-title">{entry.title || '(no title)'}</div>
+                            <div className="entry-row-username">{entry.username}</div>
+                            <div className="entry-row-health">{describeFinding(finding, report)}</div>
+                        </div>
+                    </div>
+                ))
             )}
         </div>
     );
@@ -775,7 +837,7 @@ function AiSortPanel({
     return (
         <div>
             <div className="middle-pane-header">
-                <strong>Organize with AI</strong>
+                <strong>Organize with your own AI</strong>
                 <button type="button" onClick={onClose}>
                     Close
                 </button>
@@ -1217,7 +1279,7 @@ function GroupTreeNode({
 }: {
     node: GroupNode;
     depth: number;
-    selectedGroupUuid: string;
+    selectedGroupUuid: string | undefined;
     recycleBinGroupUuid: string | undefined;
     onSelect: (uuid: string) => void;
     onCreateChild: (parentUuid: string) => Promise<void>;
@@ -1328,6 +1390,10 @@ function flattenGroups(node: GroupNode): GroupNode[] {
     return [node, ...node.groups.flatMap(flattenGroups)];
 }
 
+function flattenEntries(node: GroupNode): EntrySummary[] {
+    return [...node.entries, ...node.groups.flatMap(flattenEntries)];
+}
+
 function findGroup(node: GroupNode, uuid: string): GroupNode | undefined {
     return flattenGroups(node).find((g) => g.uuid === uuid);
 }
@@ -1342,6 +1408,12 @@ function findEntryParentGroupUuid(node: GroupNode, entryUuid: string): string | 
 function isGroupInRecycleBin(root: GroupNode, groupUuid: string, recycleBinGroupUuid: string | undefined): boolean {
     const recycleBin = recycleBinGroupUuid ? findGroup(root, recycleBinGroupUuid) : undefined;
     return !!recycleBin && !!findGroup(recycleBin, groupUuid);
+}
+
+// Leaves any existing scheme alone (androidapp://, ssh://, ...) — only bare hosts get https:// added.
+function normalizeUrlValue(value: string): string {
+    const trimmed = value.trim();
+    return !trimmed || /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
 function toWebUrl(value: string): string | undefined {
@@ -1461,7 +1533,7 @@ function EntryDetailPanel({
     }
 
     function openUrl(): void {
-        const destination = toWebUrl(urlValue);
+        const destination = toWebUrl(normalizeUrlValue(urlValue));
         if (destination) {
             void chrome.tabs.create({ url: destination });
         }
@@ -1514,9 +1586,13 @@ function EntryDetailPanel({
                         type="text"
                         value={urlValue}
                         onChange={(e) => setUrlValue(e.target.value)}
-                        onBlur={(e) => void saveField('url', e.target.value)}
+                        onBlur={(e) => {
+                            const normalized = normalizeUrlValue(e.target.value);
+                            setUrlValue(normalized);
+                            void saveField('url', normalized);
+                        }}
                     />
-                    <button type="button" onClick={openUrl} disabled={!toWebUrl(urlValue)} title="Open website">
+                    <button type="button" onClick={openUrl} disabled={!toWebUrl(normalizeUrlValue(urlValue))} title="Open website">
                         Go
                     </button>
                 </div>
@@ -1590,6 +1666,8 @@ function PasswordEditor({
 }) {
     const [password, setPassword] = useState(initialPassword);
     const [entropy, setEntropy] = useState<number | undefined>(undefined);
+    const [showGenerator, setShowGenerator] = useState(false);
+    const generatorRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         setEntropy(undefined);
@@ -1599,9 +1677,27 @@ function PasswordEditor({
         return () => window.clearTimeout(timer);
     }, [password]);
 
+    useEffect(() => {
+        if (!showGenerator) {
+            return;
+        }
+        function handleOutsideClick(e: MouseEvent): void {
+            if (generatorRef.current && !generatorRef.current.contains(e.target as Node)) {
+                setShowGenerator(false);
+            }
+        }
+        document.addEventListener('mousedown', handleOutsideClick);
+        return () => document.removeEventListener('mousedown', handleOutsideClick);
+    }, [showGenerator]);
+
+    function applyGenerated(generated: string): void {
+        setPassword(generated);
+        void onSave(generated);
+    }
+
     return (
         <>
-            <div className="password-row">
+            <div className="password-row" ref={generatorRef}>
                 <input
                     type={showPassword ? 'text' : 'password'}
                     value={password}
@@ -1611,6 +1707,18 @@ function PasswordEditor({
                 <button type="button" onClick={onToggleVisibility}>
                     {showPassword ? 'Hide' : 'Show'}
                 </button>
+                <button type="button" title="Generate password" aria-label="Generate password" onClick={() => setShowGenerator((v) => !v)}>
+                    🎲
+                </button>
+                {showGenerator && (
+                    <div className="password-generator-popover">
+                        <PasswordGeneratorPanel
+                            actionLabel="Use password"
+                            onAction={applyGenerated}
+                            onClose={() => setShowGenerator(false)}
+                        />
+                    </div>
+                )}
             </div>
             <div className="password-strength">
                 {entropy === undefined

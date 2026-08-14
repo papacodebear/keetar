@@ -12,6 +12,7 @@ import { isBiometricEnrolled, unlockToPasswordHash } from '../../auth/biometric'
 import { isWebAuthnSupported } from '../../auth/webauthn';
 import { EntryIcon } from '../shared/EntryIcon';
 import { VaultProviderIcon } from '../shared/VaultProviderIcon';
+import { PasswordGeneratorPanel } from '../shared/PasswordGeneratorPanel';
 import { tabs } from '../../platform';
 import { ensureVaultFilePermission } from '../../providers/local-file';
 
@@ -437,6 +438,7 @@ function UnlockedView({
     onDisconnect: () => Promise<void>;
 }) {
     const [toast, setToast] = useState('');
+    const [showGenerator, setShowGenerator] = useState(false);
     const matchedEntries = entries.filter((entry) => matchedUuids.has(entry.uuid));
 
     function showToast(message: string): void {
@@ -450,6 +452,10 @@ function UnlockedView({
             await navigator.clipboard.writeText(response.value);
             showToast(`${label} copied`);
         }
+    }
+
+    function rememberGeneratedPassword(value: string): void {
+        void sendToBackground({ type: 'CAPTURE_GENERATED_PASSWORD', password: value });
     }
 
     async function fill(entryUuid: string): Promise<void> {
@@ -531,7 +537,18 @@ function UnlockedView({
                         Detect fields
                     </button>
                 )}
+                <button type="button" onClick={() => setShowGenerator((v) => !v)} title="Generate a password">
+                    🎲 Generate
+                </button>
             </div>
+            {showGenerator && (
+                <div className="password-generator-overlay">
+                    <PasswordGeneratorPanel
+                        onClose={() => setShowGenerator(false)}
+                        onCopy={rememberGeneratedPassword}
+                    />
+                </div>
+            )}
             {toast && <p className="copy-toast">{toast}</p>}
             <ul className="entry-list">
                 {matchedEntries.map((entry) => (
@@ -614,7 +631,8 @@ function PendingLoginPromptCard({
         <div className="login-prompt">
             <strong>{prompt.kind === 'save' ? 'Save login?' : 'Update saved login?'}</strong>
             <span className="login-prompt-detail">
-                {prompt.title} · {prompt.username}
+                {prompt.title}
+                {prompt.username && ` · ${prompt.username}`}
             </span>
             <span className="login-prompt-url">{prompt.url}</span>
             <div className="login-prompt-actions">

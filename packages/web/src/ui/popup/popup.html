@@ -52,9 +52,30 @@
       }
       button { font-size: 12px; padding: 0.3rem 0.6rem; cursor: pointer; }
       .error { color: #c00; margin: 0; }
-      .toolbar { display: flex; gap: 0.5rem; align-items: center; }
+      .toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
       .toolbar input { flex: 1; }
       .copy-toast { color: #2a7a2a; margin: 0; }
+      .password-generator-overlay {
+        padding: 0.6rem;
+        background: rgba(127, 127, 127, 0.06);
+        border: 1px solid rgba(127, 127, 127, 0.3);
+        border-radius: 6px;
+      }
+      .password-generator-panel { display: flex; flex-direction: column; gap: 0.5rem; }
+      .password-generator-mode { display: flex; gap: 0.25rem; }
+      .password-generator-mode button.selected { background: rgba(60, 130, 246, 0.18); }
+      .password-generator-value-row { display: flex; gap: 0.25rem; }
+      .password-generator-value-row input { flex: 1; font-family: monospace; }
+      .password-generator-copy-button { display: inline-flex; align-items: center; justify-content: center; }
+      .password-generator-error { color: #c00; font-size: 0.85em; margin: 0; }
+      .password-generator-options { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85em; }
+      .password-generator-options label { display: flex; align-items: center; gap: 0.35rem; }
+      .password-generator-options input[type='number'] { width: 4.5rem; }
+      .password-generator-options input:disabled { opacity: 0.5; }
+      .password-generator-symbols-row { display: flex; align-items: center; gap: 0.35rem; }
+      .password-generator-symbols-row label { flex-shrink: 0; }
+      .password-generator-symbols-row input[type='text'] { flex: 1; min-width: 0; }
+      .password-generator-footer { display: flex; gap: 0.35rem; }
       .entry-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
       .entry-row {
         display: flex;

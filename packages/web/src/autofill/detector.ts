@@ -12,7 +12,7 @@ const NAME_ID_USERNAME_PATTERN = /user|login|email/i;
 const LABEL_PASSWORD_PATTERN = /password/i;
 const LABEL_USERNAME_PATTERN = /username|e-?mail/i;
 
-// Detect form; username-only result valid for multi-step flows (§5.2).
+// Detects a login form (username-only is valid for multi-step flows, §5.2); merges strategies via ??= so one partial match can't block a more complete one.
 export function detectLoginForm(root: ParentNode = document): DetectedLoginForm | undefined {
     const strategies: Strategy[] = [
         byAutocomplete,
@@ -22,13 +22,17 @@ export function detectLoginForm(root: ParentNode = document): DetectedLoginForm 
         byLabelText,
         byPlaceholder
     ];
+    let usernameField: HTMLInputElement | undefined;
+    let passwordField: HTMLInputElement | undefined;
     for (const strategy of strategies) {
-        const result = strategy(root);
-        if (result) {
-            return result;
+        if (usernameField && passwordField) {
+            break;
         }
+        const result = strategy(root);
+        usernameField ??= result?.usernameField;
+        passwordField ??= result?.passwordField;
     }
-    return undefined;
+    return usernameField || passwordField ? { usernameField, passwordField } : undefined;
 }
 
 export function detectOneTimeCodeField(root: ParentNode = document): HTMLInputElement | undefined {

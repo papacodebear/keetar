@@ -27,6 +27,15 @@ const PENDING_LOGIN_BADGE_COLOR = '#dc2626';
 const DEFAULT_BADGE_COLOR = '#2563eb';
 type PendingLoginCaptures = Record<string, CapturedLogin>;
 
+// Remembers a Keetar-generated password just long enough to spot it in a later form
+// submission (e.g. a change-password page), even with no username to match against.
+const GENERATED_PASSWORD_STORAGE_KEY = 'keetar.recentGeneratedPassword';
+const GENERATED_PASSWORD_EXPIRY_MS = 5 * 60 * 1000;
+interface RecentGeneratedPassword {
+    password: string;
+    generatedAt: number;
+}
+
 async function getCapturedLogin(tabId: number): Promise<CapturedLogin | undefined> {
     return (await sessionStorage.get<PendingLoginCaptures>(PENDING_LOGIN_STORAGE_KEY))?.[String(tabId)];
 }
@@ -43,9 +52,34 @@ async function clearCapturedLogin(tabId: number): Promise<void> {
     await sessionStorage.set(PENDING_LOGIN_STORAGE_KEY, captures);
 }
 
+async function rememberGeneratedPassword(password: string): Promise<void> {
+    await sessionStorage.set(GENERATED_PASSWORD_STORAGE_KEY, { password, generatedAt: Date.now() });
+}
+
+async function getRecentGeneratedPassword(): Promise<string | undefined> {
+    const stored = await sessionStorage.get<RecentGeneratedPassword>(GENERATED_PASSWORD_STORAGE_KEY);
+    if (!stored || Date.now() - stored.generatedAt > GENERATED_PASSWORD_EXPIRY_MS) {
+        return undefined;
+    }
+    return stored.password;
+}
+
+async function clearRecentGeneratedPassword(): Promise<void> {
+    await sessionStorage.remove(GENERATED_PASSWORD_STORAGE_KEY);
+}
+
+// Which password an 'update' actually writes: the Keetar-generated one if the submission
+// contained it (a change-password form), otherwise whatever the ordinary capture read.
+function resolveCapturedPassword(capture: CapturedLogin, generated: string | undefined): string | undefined {
+    if (generated && capture.passwordCandidates?.includes(generated)) {
+        return generated;
+    }
+    return capture.password;
+}
+
 async function pendingLoginPrompt(tabId: number): Promise<PendingLoginPrompt | undefined> {
     const capture = await getCapturedLogin(tabId);
-    if (!hasCompleteCapturedLogin(capture) || vaultSession.status !== 'unlocked') {
+    if (!capture || vaultSession.status !== 'unlocked') {
         return undefined;
     }
 
@@ -53,6 +87,26 @@ async function pendingLoginPrompt(tabId: number): Promise<PendingLoginPrompt | u
     const matchedEntries = matchEntries(entries, capture.url)
         .map((match) => entries.find((entry) => entry.uuid === match.uuid))
         .filter((entry): entry is (typeof entries)[number] => entry !== undefined);
+
+    // Track B: a submitted password field matches one Keetar generated recently.
+    const generated = await getRecentGeneratedPassword();
+    if (generated && capture.passwordCandidates?.includes(generated)) {
+        const staleMatches = matchedEntries.filter((entry) => !vaultSession.matchesEntryPassword(entry.uuid, generated));
+        if (staleMatches.length > 0) {
+            return {
+                kind: 'update',
+                title: capture.title || capture.url,
+                url: capture.url,
+                username: capture.username,
+                updateCandidates: staleMatches.map((entry) => ({ uuid: entry.uuid, title: entry.title }))
+            };
+        }
+    }
+
+    // Track A: an ordinary login form's full username+password capture.
+    if (!hasCompleteCapturedLogin(capture)) {
+        return undefined;
+    }
     if (matchedEntries.some((entry) => vaultSession.matchesEntryCredentials(entry.uuid, capture.username, capture.password))) {
         await clearCapturedLogin(tabId);
         return undefined;
@@ -146,6 +200,12 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
             }
             return { ok: true, type: 'CAPTURE_LOGIN_CREDENTIALS' };
         }
+        case 'CAPTURE_GENERATED_PASSWORD': {
+            if (vaultSession.status === 'unlocked') {
+                await rememberGeneratedPassword(request.password);
+            }
+            return { ok: true, type: 'CAPTURE_GENERATED_PASSWORD' };
+        }
         case 'GET_PENDING_LOGIN_PROMPT':
             return { ok: true, type: 'GET_PENDING_LOGIN_PROMPT', prompt: await pendingLoginPrompt(request.tabId) };
         case 'APPLY_PENDING_LOGIN_PROMPT': {
@@ -157,23 +217,27 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
             }
             const capture = await getCapturedLogin(request.tabId);
             const prompt = await pendingLoginPrompt(request.tabId);
-            if (!hasCompleteCapturedLogin(capture) || !prompt) {
+            if (!capture || !prompt) {
                 throw new Error('there is no pending login to save');
             }
             if (request.action === 'save') {
-                if (prompt.kind !== 'save') {
+                if (prompt.kind !== 'save' || !hasCompleteCapturedLogin(capture)) {
                     throw new Error('choose an existing entry to update');
                 }
                 await vaultSession.createEntryFromCapturedLogin(capture);
             } else {
+                const generated = await getRecentGeneratedPassword();
+                const password = resolveCapturedPassword(capture, generated);
                 if (
                     prompt.kind !== 'update' ||
+                    !password ||
                     !request.entryUuid ||
                     !prompt.updateCandidates.some((entry) => entry.uuid === request.entryUuid)
                 ) {
                     throw new Error('choose an entry that matches this page');
                 }
-                await vaultSession.updateEntryFromCapturedLogin(request.entryUuid, capture);
+                await vaultSession.updateEntryFromCapturedLogin(request.entryUuid, { ...capture, password });
+                await clearRecentGeneratedPassword();
             }
             await clearCapturedLogin(request.tabId);
             await action.setBadgeBackgroundColor({ tabId: request.tabId, color: DEFAULT_BADGE_COLOR });
@@ -323,6 +387,8 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
     }
 });
 
-// Dev console access for testing (e.g. __keetarDebug.vaultSession.createGroup).
+// Dev console access for testing (e.g. __keetarDebug.vaultSession.createGroup) — dev builds only.
 declare const self: { __keetarDebug?: unknown } & typeof globalThis;
-self.__keetarDebug = { vaultSession };
+if (process.env.NODE_ENV !== 'production') {
+    self.__keetarDebug = { vaultSession };
+}

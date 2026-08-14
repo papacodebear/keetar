@@ -17,6 +17,9 @@ import type { SyncStatus } from '../../providers/opfs-cache';
 import { createEmptyVaultBytes } from '../../providers/vault-creation';
 import { sendToBackground } from '../../background/message-bus';
 import { VaultProviderIcon } from '../shared/VaultProviderIcon';
+import { GeneratorOptionsForm, type GeneratorMode } from '../shared/GeneratorOptionsForm';
+import { getGeneratorPreferences, setGeneratorPreferences } from '../../config/generator-config';
+import type { GeneratorPreferences } from '../../config/generator-config';
 
 // Setup & config without vault unlock; owns backend setup and biometric enrollment (§8.1–8.2).
 
@@ -98,7 +101,51 @@ export function App() {
                     onCancel={() => setMode('idle')}
                 />
             )}
+
+            <GeneratorPreferencesSection />
         </div>
+    );
+}
+
+// Saved generator defaults — global preference, independent of any vault (§8.2).
+function GeneratorPreferencesSection() {
+    const [preferences, setPreferences] = useState<GeneratorPreferences | undefined>(undefined);
+    const [saved, setSaved] = useState(false);
+
+    useEffect(() => {
+        void getGeneratorPreferences().then(setPreferences);
+    }, []);
+
+    async function handleSave(): Promise<void> {
+        if (!preferences) {
+            return;
+        }
+        await setGeneratorPreferences(preferences);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 1500);
+    }
+
+    if (!preferences) {
+        return null;
+    }
+
+    return (
+        <section>
+            <h2>Password Generator</h2>
+            <p className="hint">Defaults used each time the password generator opens in Manager or the popup.</p>
+            <GeneratorOptionsForm
+                mode={preferences.mode}
+                onModeChange={(mode: GeneratorMode) => setPreferences({ ...preferences, mode })}
+                passwordOptions={preferences.password}
+                onPasswordOptionsChange={(password) => setPreferences({ ...preferences, password })}
+                passphraseOptions={preferences.passphrase}
+                onPassphraseOptionsChange={(passphrase) => setPreferences({ ...preferences, passphrase })}
+            />
+            <button type="button" onClick={() => void handleSave()}>
+                Save
+            </button>
+            {saved && <span className="success">Saved</span>}
+        </section>
     );
 }
 

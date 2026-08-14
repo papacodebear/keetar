@@ -2,7 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Keetar — Options</title>
+    <title>Keetar</title>
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/keetar-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/keetar-32.png" />
     <style>
       :root { color-scheme: light dark; }
       body {
@@ -46,6 +48,16 @@
       .sync-pending-badge { color: #a06a00; }
       .sync-conflict-badge { color: #c00; }
       .sync-conflict { margin-top: 0.5rem; }
+      .password-generator-mode { display: flex; gap: 0.25rem; margin-bottom: 0.5rem; }
+      .password-generator-mode button.selected { background: rgba(60, 130, 246, 0.18); }
+      .password-generator-options { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.9em; max-width: 320px; margin-bottom: 0.75rem; }
+      .password-generator-options label { display: flex; align-items: center; gap: 0.4rem; }
+      .password-generator-options input[type='text'] { flex: 1; }
+      .password-generator-options input[type='number'] { width: 5rem; }
+      .password-generator-options input:disabled { opacity: 0.5; }
+      .password-generator-symbols-row { display: flex; align-items: center; gap: 0.35rem; }
+      .password-generator-symbols-row label { flex-shrink: 0; }
+      .password-generator-symbols-row input[type='text'] { flex: 1; min-width: 0; }
     </style>
   </head>
   <body>

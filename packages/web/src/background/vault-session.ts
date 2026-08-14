@@ -246,6 +246,11 @@ class VaultSession {
         );
     }
 
+    matchesEntryPassword(entryUuid: string, password: string): boolean {
+        const entry = this.requireEntry(entryUuid);
+        return fieldText(entry.fields.get('Password')) === password;
+    }
+
     getEntryTotp(entryUuid: string): Promise<Totp.TotpCode> {
         const entry = this.requireEntry(entryUuid);
         const value = fieldText(entry.fields.get('otp')) || fieldText(entry.fields.get('TOTP Seed'));
@@ -370,7 +375,7 @@ class VaultSession {
     }
 
     /** Updates a reviewed entry from a login capture, preserving an existing custom icon. */
-    async updateEntryFromCapturedLogin(entryUuid: string, login: CapturedLogin & { username: string; password: string }): Promise<void> {
+    async updateEntryFromCapturedLogin(entryUuid: string, login: CapturedLogin & { password: string }): Promise<void> {
         const db = this.requireUnlocked();
         const entry = this.requireEntry(entryUuid);
         entry.pushHistory();
@@ -880,12 +885,14 @@ async function copyAttachments(
     }
 }
 
-function loginFields(login: CapturedLogin & { username: string; password: string }): EntryFields {
+// A username-less capture (e.g. a change-password form) only ever touches the password —
+// applyFields skips undefined fields, so title/username/url are left untouched on the entry.
+function loginFields(login: CapturedLogin & { password: string }): EntryFields {
     return {
-        title: login.title.trim() || login.url,
+        title: login.username ? login.title.trim() || login.url : undefined,
         username: login.username,
         password: login.password,
-        url: login.url
+        url: login.username ? login.url : undefined
     };
 }
 

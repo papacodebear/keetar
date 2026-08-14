@@ -94,6 +94,10 @@ export {
     preloadPasswordStrength
 } from './health/analyser.js';
 export { checkPasswordBreach, createHibpClient } from './health/hibp.js';
+export { generatePassword, DefaultSymbolCharacters } from './generator/password.js';
+export type { PasswordGeneratorOptions } from './generator/password.js';
+export { generatePassphrase } from './generator/passphrase.js';
+export type { PassphraseGeneratorOptions } from './generator/passphrase.js';
 export type {
     PasswordBreachChecker,
     PasswordHealthEntry,

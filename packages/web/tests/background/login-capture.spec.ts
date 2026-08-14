@@ -11,7 +11,8 @@ describe('captured login merging', () => {
             title: 'Sign in',
             url: 'https://example.com/login',
             username: 'alice',
-            password: 'secret'
+            password: 'secret',
+            passwordCandidates: []
         });
         expect(hasCompleteCapturedLogin(captured)).toBe(true);
     });
@@ -20,5 +21,19 @@ describe('captured login merging', () => {
         expect(hasCompleteCapturedLogin({ title: 'Sign in', url: 'https://example.com/login', username: 'alice' })).toBe(
             false
         );
+    });
+
+    test('unions passwordCandidates across merge steps', () => {
+        const first = { title: 'Change password', url: 'https://example.com/change', passwordCandidates: ['old-pw'] };
+        const second = { title: 'Change password', url: 'https://example.com/change', passwordCandidates: ['new-pw', 'new-pw'] };
+        const merged = mergeCapturedLogin(first, second);
+
+        expect(merged.passwordCandidates).toEqual(['old-pw', 'new-pw', 'new-pw']);
+    });
+
+    test('treats a capture with no passwordCandidates as an empty list after merging', () => {
+        const merged = mergeCapturedLogin(undefined, { title: 'Sign in', url: 'https://example.com/login', username: 'alice' });
+
+        expect(merged.passwordCandidates).toEqual([]);
     });
 });

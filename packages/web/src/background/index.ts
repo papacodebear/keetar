@@ -8,7 +8,7 @@ import {
 } from '@keetar/core';
 import { installArgon2 } from './argon2-wasm';
 import { vaultSession } from './vault-session';
-import { registerMessageHandler, type KeetarResponse, type PendingLoginPrompt } from './message-bus';
+import { registerMessageHandler, type KeetarResponse, type PendingLoginPrompt, type PendingPasskeyRequest } from './message-bus';
 import { startKeepalive } from './keepalive';
 import { action, idle, sessionStorage, tabs } from '../platform';
 import { matchEntries } from '../autofill/matcher';
@@ -26,6 +26,10 @@ const PENDING_LOGIN_STORAGE_KEY = 'keetar.pendingLoginCaptures';
 const PENDING_LOGIN_BADGE_COLOR = '#dc2626';
 const DEFAULT_BADGE_COLOR = '#2563eb';
 type PendingLoginCaptures = Record<string, CapturedLogin>;
+
+// Bridges content-relay (stashes) to the passkey-prompt iframe (fetches) — lives only for the
+// few seconds between interception and the prompt loading, so an in-memory map is enough.
+const pendingPasskeyRequests = new Map<string, PendingPasskeyRequest>();
 
 // Remembers a Keetar-generated password just long enough to spot it in a later form
 // submission (e.g. a change-password page), even with no username to match against.
@@ -340,6 +344,43 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
                 type: 'GET_ATTACHMENT',
                 dataBase64: vaultSession.getAttachmentBase64(request.entryUuid, request.name)
             };
+        case 'SET_CUSTOM_FIELD':
+            await vaultSession.setCustomField(request.entryUuid, request.name, request.value, request.protect);
+            return { ok: true, type: 'SET_CUSTOM_FIELD' };
+        case 'RENAME_CUSTOM_FIELD':
+            await vaultSession.renameCustomField(request.entryUuid, request.oldName, request.newName);
+            return { ok: true, type: 'RENAME_CUSTOM_FIELD' };
+        case 'REMOVE_CUSTOM_FIELD':
+            await vaultSession.removeCustomField(request.entryUuid, request.name);
+            return { ok: true, type: 'REMOVE_CUSTOM_FIELD' };
+        case 'SET_ENTRY_CLONE':
+            await vaultSession.setEntryClone(request.entryUuid, request.sourceEntryUuid);
+            return { ok: true, type: 'SET_ENTRY_CLONE' };
+        case 'STASH_PASSKEY_REQUEST': {
+            const requestId = crypto.randomUUID();
+            pendingPasskeyRequests.set(requestId, request.request);
+            return { ok: true, type: 'STASH_PASSKEY_REQUEST', requestId };
+        }
+        case 'GET_PASSKEY_REQUEST':
+            return {
+                ok: true,
+                type: 'GET_PASSKEY_REQUEST',
+                request: pendingPasskeyRequests.get(request.requestId)
+            };
+        case 'LIST_PASSKEYS_FOR_RPID':
+            return {
+                ok: true,
+                type: 'LIST_PASSKEYS_FOR_RPID',
+                passkeys: vaultSession.listPasskeysForRpId(request.rpId, request.allowCredentialIds)
+            };
+        case 'CREATE_PASSKEY': {
+            const result = await vaultSession.createPasskey(request);
+            return { ok: true, type: 'CREATE_PASSKEY', ...result };
+        }
+        case 'SIGN_PASSKEY_ASSERTION': {
+            const result = await vaultSession.signPasskeyAssertion(request);
+            return { ok: true, type: 'SIGN_PASSKEY_ASSERTION', ...result };
+        }
         case 'GET_ENTRY_CUSTOM_ICON':
             return {
                 ok: true,

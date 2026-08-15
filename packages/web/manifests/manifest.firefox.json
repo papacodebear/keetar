@@ -37,9 +37,19 @@
       "matches": ["http://*/*", "https://*/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["passkey-shim.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
     }
   ],
-  "web_accessible_resources": ["picker-callback/picker-callback.html", "icons/keetar-32.png"],
+  "web_accessible_resources": [
+    "picker-callback/picker-callback.html",
+    "icons/keetar-32.png",
+    "passkey-prompt/passkey-prompt.html"
+  ],
   "permissions": [
     "storage",
     "idle",

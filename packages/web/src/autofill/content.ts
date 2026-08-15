@@ -2,6 +2,7 @@ import { detectLoginForm, detectOneTimeCodeField } from './detector';
 import { fillField } from './filler';
 import type { ContentScriptMessage } from './messages';
 import { sendToBackground, type PageEntryMatch } from '../background/message-bus';
+import { initPasskeyContentRelay } from '../passkey-provider/content-relay';
 
 // Detect form, signal background, receive fill message (§5.1); never holds credentials.
 
@@ -246,6 +247,8 @@ async function fillPageEntry(entryUuid: string): Promise<void> {
     hideEntryMenu();
     await sendToBackground({ type: 'FILL_PAGE_ENTRY', entryUuid });
 }
+
+initPasskeyContentRelay();
 
 tryDetectAndNotify();
 // Watches for the page's whole lifetime — SPA flows can swap fields without navigating; the dedup above keeps this a no-op otherwise.

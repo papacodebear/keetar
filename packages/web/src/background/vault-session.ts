@@ -27,6 +27,34 @@ import { getConfiguredVault } from '../config/vault-config';
 import { createFileProvider } from '../providers';
 import { fetchFaviconPng } from './favicon';
 import type { CapturedLogin } from './login-capture';
+import { isReservedFieldName } from './reserved-fields';
+import { buildFieldReference, parseFieldReference } from './field-reference';
+import { applyCloneAwareness, type CloneAwareEntry } from './clone-aware-health';
+import {
+    isRpIdValidForOrigin,
+    matchEntriesForRpId,
+    passkeyAttachmentName,
+    decodePasskeyRecord,
+    encodePasskeyRecord,
+    parsePasskeyIndex,
+    serializePasskeyIndex,
+    PASSKEY_INDEX_FIELD
+} from './passkey-store';
+import {
+    base64UrlDecode,
+    base64UrlEncode,
+    buildAttestationObject,
+    buildAttestedCredentialData,
+    buildAuthenticatorData,
+    buildClientDataJson,
+    concatBytes,
+    exportCosePublicKey,
+    exportPkcs8,
+    generateP256KeyPair,
+    importPkcs8PrivateKey,
+    sha256,
+    signWithDer
+} from '../passkey-provider/webauthn-crypto';
 import {
     findExactDuplicateGroups,
     findExactDuplicateMatches,
@@ -75,6 +103,12 @@ export interface AttachmentSummary {
     size: number;
 }
 
+export interface EntryCustomField {
+    name: string;
+    value: string;
+    protected: boolean;
+}
+
 export interface EntryDetail {
     uuid: string;
     groupUuid: string;
@@ -84,6 +118,9 @@ export interface EntryDetail {
     url: string;
     notes: string;
     attachments: AttachmentSummary[];
+    customFields: EntryCustomField[];
+    /** Set when Username/Password are live KeePass field references to another entry (a "clone"). */
+    clonedFromEntryUuid: string | undefined;
     icon: number;
     hasCustomIcon: boolean;
 }
@@ -234,21 +271,25 @@ class VaultSession {
     }
 
     getEntryField(entryUuid: string, field: EntryFieldName): string {
+        const db = this.requireUnlocked();
         const entry = this.requireEntry(entryUuid);
         const fieldName = field === 'username' ? 'UserName' : 'Password';
-        return fieldText(entry.fields.get(fieldName));
+        return resolveFieldValue(db, fieldText(entry.fields.get(fieldName)));
     }
 
     matchesEntryCredentials(entryUuid: string, username: string, password: string): boolean {
+        const db = this.requireUnlocked();
         const entry = this.requireEntry(entryUuid);
         return (
-            fieldText(entry.fields.get('UserName')) === username && fieldText(entry.fields.get('Password')) === password
+            resolveFieldValue(db, fieldText(entry.fields.get('UserName'))) === username &&
+            resolveFieldValue(db, fieldText(entry.fields.get('Password'))) === password
         );
     }
 
     matchesEntryPassword(entryUuid: string, password: string): boolean {
+        const db = this.requireUnlocked();
         const entry = this.requireEntry(entryUuid);
-        return fieldText(entry.fields.get('Password')) === password;
+        return resolveFieldValue(db, fieldText(entry.fields.get('Password'))) === password;
     }
 
     getEntryTotp(entryUuid: string): Promise<Totp.TotpCode> {
@@ -260,18 +301,28 @@ class VaultSession {
         return Totp.generateTotpCode(value);
     }
 
-    getPasswordHealth(): Promise<PasswordHealthReport> {
+    async getPasswordHealth(): Promise<PasswordHealthReport> {
         const db = this.requireUnlocked();
         const recycleBinUuid = db.meta.recycleBinUuid;
+        const cloneEntries: CloneAwareEntry[] = [];
         const entries = Array.from(db.getDefaultGroup().allEntries())
             .filter((entry) => !recycleBinUuid || !isInGroup(entry, recycleBinUuid))
-            .map((entry) => ({
-                uuid: entry.uuid.id,
-                title: fieldText(entry.fields.get('Title')),
-                password: fieldText(entry.fields.get('Password')),
-                lastModified: entry.times.lastModTime
-            }));
-        return analysePasswordHealth(entries, (password) => this.hibpClient.checkPassword(password));
+            .map((entry) => {
+                const rawPassword = fieldText(entry.fields.get('Password'));
+                const ref = parseFieldReference(rawPassword);
+                const source = ref && findEntryByUuidHex(db.getDefaultGroup(), ref.uuidHex);
+                const password = source ? resolveFieldValue(db, rawPassword) : rawPassword;
+                cloneEntries.push({ uuid: entry.uuid.id, password, clonedFromEntryUuid: source?.uuid.id });
+                return {
+                    uuid: entry.uuid.id,
+                    title: fieldText(entry.fields.get('Title')),
+                    password,
+                    // A clone's meaningful "age" is when the shared credential was last actually changed.
+                    lastModified: source ? source.times.lastModTime : entry.times.lastModTime
+                };
+            });
+        const report = await analysePasswordHealth(entries, (password) => this.hibpClient.checkPassword(password));
+        return applyCloneAwareness(report, cloneEntries);
     }
 
     getDuplicateCredentialGroups(): DuplicateCredentialGroup[] {
@@ -306,25 +357,263 @@ class VaultSession {
     }
 
     getEntryDetail(entryUuid: string): EntryDetail {
+        const db = this.requireUnlocked();
         const entry = this.requireEntry(entryUuid);
         if (!entry.parentGroup) {
             throw new Error('entry has no parent group');
         }
+        const rawPassword = fieldText(entry.fields.get('Password'));
+        const passwordRef = parseFieldReference(rawPassword);
+        const cloneSource = passwordRef && findEntryByUuidHex(db.getDefaultGroup(), passwordRef.uuidHex);
         return {
             uuid: entry.uuid.id,
             groupUuid: entry.parentGroup.uuid.id,
             title: fieldText(entry.fields.get('Title')),
-            username: fieldText(entry.fields.get('UserName')),
-            password: fieldText(entry.fields.get('Password')),
+            username: resolveFieldValue(db, fieldText(entry.fields.get('UserName'))),
+            password: resolveFieldValue(db, rawPassword),
             url: fieldText(entry.fields.get('URL')),
             notes: fieldText(entry.fields.get('Notes')),
+            clonedFromEntryUuid: cloneSource?.uuid.id,
             attachments: Array.from(entry.binaries.entries()).map(([name, value]) => ({
                 name,
                 size: resolveBinary(value).byteLength
             })),
+            customFields: customFieldsOf(entry),
             icon: entry.icon ?? Consts.Icons.Key,
             hasCustomIcon: entry.customIcon !== undefined
         };
+    }
+
+    async setCustomField(entryUuid: string, name: string, value: string, protect: boolean): Promise<void> {
+        const entry = this.requireEntry(entryUuid);
+        validateCustomFieldName(entry, name);
+        entry.pushHistory();
+        entry.fields.set(name, protect ? ProtectedValue.fromString(value) : value);
+        entry.times.update();
+        await this.persist();
+    }
+
+    async renameCustomField(entryUuid: string, oldName: string, newName: string): Promise<void> {
+        const entry = this.requireEntry(entryUuid);
+        if (isReservedFieldName(oldName)) {
+            throw new Error('field is not a custom field');
+        }
+        const existing = entry.fields.get(oldName);
+        if (existing === undefined) {
+            throw new Error('field not found');
+        }
+        if (newName !== oldName) {
+            validateCustomFieldName(entry, newName);
+        }
+        entry.pushHistory();
+        entry.fields.delete(oldName);
+        entry.fields.set(newName, existing);
+        entry.times.update();
+        await this.persist();
+    }
+
+    async removeCustomField(entryUuid: string, name: string): Promise<void> {
+        const entry = this.requireEntry(entryUuid);
+        if (isReservedFieldName(name)) {
+            throw new Error('field is not a custom field');
+        }
+        entry.pushHistory();
+        entry.fields.delete(name);
+        entry.times.update();
+        await this.persist();
+    }
+
+    // Sets or clears a "clone" relationship: Username/Password become live KeePass {REF:...}
+    // field references to the source entry, so edits to the source propagate automatically.
+    async setEntryClone(entryUuid: string, sourceEntryUuid: string | undefined): Promise<void> {
+        const db = this.requireUnlocked();
+        const entry = this.requireEntry(entryUuid);
+        entry.pushHistory();
+        if (sourceEntryUuid) {
+            if (sourceEntryUuid === entryUuid) {
+                throw new Error('an entry cannot clone itself');
+            }
+            const source = this.requireEntry(sourceEntryUuid);
+            const hex = uuidHexOf(source);
+            const protection = db.meta.memoryProtection;
+            const usernameRef = buildFieldReference('U', hex);
+            const passwordRef = buildFieldReference('P', hex);
+            entry.fields.set('UserName', protection.userName ? ProtectedValue.fromString(usernameRef) : usernameRef);
+            entry.fields.set('Password', protection.password ? ProtectedValue.fromString(passwordRef) : passwordRef);
+        } else {
+            entry.fields.set('UserName', '');
+            entry.fields.set('Password', '');
+        }
+        entry.times.update();
+        await this.persist();
+    }
+
+    // WebAuthn create(): keypair never leaves this method; only public bytes go back to the caller.
+    async createPasskey(params: {
+        rpId: string;
+        origin: string;
+        userName: string;
+        userHandleBase64Url: string;
+        userDisplayName?: string;
+        entryUuid?: string;
+        createNewEntry?: boolean;
+    }): Promise<{ entryUuid: string; credentialId: string; publicKeyCoseBase64: string; attestationObjectBase64: string }> {
+        const db = this.requireUnlocked();
+        if (!isRpIdValidForOrigin(params.rpId, params.origin)) {
+            throw new Error('rpId does not match the page origin');
+        }
+
+        const { entry, isNew } = this.resolvePasskeyEntry(db, params);
+        if (!isNew) {
+            entry.pushHistory();
+        }
+
+        const keyPair = await generateP256KeyPair();
+        const credentialId = crypto.getRandomValues(new Uint8Array(32));
+        const [privateKeyPkcs8, cosePublicKey] = await Promise.all([
+            exportPkcs8(keyPair.privateKey),
+            exportCosePublicKey(keyPair.publicKey)
+        ]);
+
+        const record = encodePasskeyRecord({
+            credentialId,
+            privateKeyPkcs8,
+            userHandle: base64UrlDecode(params.userHandleBase64Url),
+            algorithm: -7,
+            rpId: params.rpId,
+            signCount: 0
+        });
+        entry.binaries.set(passkeyAttachmentName(credentialId), await db.createBinary(ProtectedValue.fromBinary(record)));
+
+        const index = parsePasskeyIndex(fieldText(entry.fields.get(PASSKEY_INDEX_FIELD)));
+        index.push({ credentialId: base64UrlEncode(credentialId), rpId: params.rpId });
+        entry.fields.set(PASSKEY_INDEX_FIELD, serializePasskeyIndex(index));
+
+        entry.times.update();
+        await this.persist();
+
+        const attestedCredentialData = buildAttestedCredentialData(credentialId, cosePublicKey);
+        const authenticatorData = await buildAuthenticatorData({
+            rpId: params.rpId,
+            signCount: 0,
+            attestedCredentialData
+        });
+
+        return {
+            entryUuid: entry.uuid.id,
+            credentialId: base64UrlEncode(credentialId),
+            publicKeyCoseBase64: ByteUtils.bytesToBase64(cosePublicKey),
+            attestationObjectBase64: ByteUtils.bytesToBase64(buildAttestationObject(authenticatorData))
+        };
+    }
+
+    // WebAuthn get(): re-validates rpId itself rather than trusting the caller (§ Security).
+    async signPasskeyAssertion(params: {
+        entryUuid: string;
+        credentialId: string;
+        rpId: string;
+        origin: string;
+        challengeBase64: string;
+    }): Promise<{ signatureBase64: string; authenticatorDataBase64: string; userHandleBase64Url: string; signCount: number }> {
+        if (!isRpIdValidForOrigin(params.rpId, params.origin)) {
+            throw new Error('rpId does not match the page origin');
+        }
+        const db = this.requireUnlocked();
+        const entry = this.requireEntry(params.entryUuid);
+        const credentialIdBytes = base64UrlDecode(params.credentialId);
+        const attachmentName = passkeyAttachmentName(credentialIdBytes);
+        const binary = entry.binaries.get(attachmentName);
+        if (!binary) {
+            throw new Error('passkey not found on entry');
+        }
+        const record = decodePasskeyRecord(new Uint8Array(resolveBinary(binary)));
+        if (record.rpId !== params.rpId) {
+            throw new Error('passkey does not belong to this site');
+        }
+
+        const privateKey = await importPkcs8PrivateKey(record.privateKeyPkcs8);
+        const nextSignCount = record.signCount + 1;
+        const authenticatorData = await buildAuthenticatorData({ rpId: params.rpId, signCount: nextSignCount });
+        const clientDataJson = buildClientDataJson({
+            type: 'webauthn.get',
+            challenge: ByteUtils.base64ToBytes(params.challengeBase64),
+            origin: params.origin
+        });
+        const clientDataHash = await sha256(clientDataJson);
+        const signature = await signWithDer(privateKey, concatBytes([authenticatorData, clientDataHash]));
+
+        entry.binaries.set(
+            attachmentName,
+            await db.createBinary(
+                ProtectedValue.fromBinary(encodePasskeyRecord({ ...record, signCount: nextSignCount }))
+            )
+        );
+        entry.times.update();
+        await this.persist();
+
+        return {
+            signatureBase64: ByteUtils.bytesToBase64(signature),
+            authenticatorDataBase64: ByteUtils.bytesToBase64(authenticatorData),
+            userHandleBase64Url: base64UrlEncode(record.userHandle),
+            signCount: nextSignCount
+        };
+    }
+
+    listPasskeysForRpId(
+        rpId: string,
+        allowCredentialIds?: string[]
+    ): { entryUuid: string; entryTitle: string; credentialId: string }[] {
+        const db = this.requireUnlocked();
+        const recycleBinUuid = db.meta.recycleBinUuid;
+        const allowSet = allowCredentialIds ? new Set(allowCredentialIds) : undefined;
+        const results: { entryUuid: string; entryTitle: string; credentialId: string }[] = [];
+        const walk = (group: KdbxGroup) => {
+            if (recycleBinUuid && group.uuid.equals(recycleBinUuid)) {
+                return;
+            }
+            for (const entry of group.entries) {
+                for (const item of parsePasskeyIndex(fieldText(entry.fields.get(PASSKEY_INDEX_FIELD)))) {
+                    if (item.rpId !== rpId || (allowSet && !allowSet.has(item.credentialId))) {
+                        continue;
+                    }
+                    results.push({
+                        entryUuid: entry.uuid.id,
+                        entryTitle: fieldText(entry.fields.get('Title')),
+                        credentialId: item.credentialId
+                    });
+                }
+            }
+            for (const subGroup of group.groups) {
+                walk(subGroup);
+            }
+        };
+        walk(db.getDefaultGroup());
+        return results;
+    }
+
+    private resolvePasskeyEntry(
+        db: Kdbx,
+        params: { rpId: string; userName: string; userDisplayName?: string; entryUuid?: string; createNewEntry?: boolean }
+    ): { entry: KdbxEntry; isNew: boolean } {
+        if (params.entryUuid) {
+            return { entry: this.requireEntry(params.entryUuid), isNew: false };
+        }
+        if (!params.createNewEntry) {
+            const matches = matchEntriesForRpId(this.listEntries(), params.rpId);
+            if (matches.length === 1) {
+                return { entry: this.requireEntry(matches[0].uuid), isNew: false };
+            }
+            if (matches.length > 1) {
+                throw new Error('multiple entries match this site; choose one explicitly');
+            }
+        }
+        const entry = db.createEntry(db.getDefaultGroup());
+        applyFields(db, entry, {
+            title: params.userDisplayName || params.rpId,
+            username: params.userName,
+            url: `https://${params.rpId}`
+        });
+        return { entry, isNew: true };
     }
 
     // Fetch custom icon on demand (binary data not in list responses).
@@ -737,6 +1026,8 @@ class VaultSession {
             throw new Error('vault is locked');
         }
         const { db, provider, path } = this.state;
+        // Prune unreferenced binaries — content-addressed, so replaced attachments leak otherwise.
+        db.cleanup({ binaries: true, customIcons: true });
         const data = await db.save();
         await provider.write(path, data);
     }
@@ -772,6 +1063,72 @@ function fieldText(field: KdbxEntryField | undefined): string {
         return '';
     }
     return typeof field === 'string' ? field : field.getText();
+}
+
+function uuidHexOf(entry: KdbxEntry): string {
+    return ByteUtils.bytesToHex(entry.uuid.bytes).toUpperCase();
+}
+
+function findEntryByUuidHex(group: KdbxGroup, uuidHex: string): KdbxEntry | undefined {
+    for (const entry of group.entries) {
+        if (uuidHexOf(entry) === uuidHex) {
+            return entry;
+        }
+    }
+    for (const subGroup of group.groups) {
+        const found = findEntryByUuidHex(subGroup, uuidHex);
+        if (found) {
+            return found;
+        }
+    }
+    return undefined;
+}
+
+const REF_FIELD_TO_KDBX_NAME: Record<string, string> = {
+    T: 'Title',
+    U: 'UserName',
+    P: 'Password',
+    A: 'URL',
+    N: 'Notes'
+};
+const MAX_FIELD_REFERENCE_DEPTH = 4;
+
+// Resolves KeePass {REF:...} field references (a "cloned" entry's shared Username/Password) —
+// a shallow depth cap guards against reference chains/cycles.
+function resolveFieldValue(db: Kdbx, rawValue: string, depth = 0): string {
+    if (depth >= MAX_FIELD_REFERENCE_DEPTH) {
+        return rawValue;
+    }
+    const ref = parseFieldReference(rawValue);
+    const kdbxName = ref && REF_FIELD_TO_KDBX_NAME[ref.field];
+    const source = kdbxName ? findEntryByUuidHex(db.getDefaultGroup(), ref.uuidHex) : undefined;
+    if (!kdbxName || !source) {
+        return rawValue;
+    }
+    return resolveFieldValue(db, fieldText(source.fields.get(kdbxName)), depth + 1);
+}
+
+function customFieldsOf(entry: KdbxEntry): EntryCustomField[] {
+    const fields: EntryCustomField[] = [];
+    for (const [name, value] of entry.fields) {
+        if (isReservedFieldName(name)) {
+            continue;
+        }
+        fields.push({ name, value: fieldText(value), protected: value instanceof ProtectedValue });
+    }
+    return fields;
+}
+
+function validateCustomFieldName(entry: KdbxEntry, name: string): void {
+    if (!name.trim()) {
+        throw new Error('field name cannot be empty');
+    }
+    if (isReservedFieldName(name)) {
+        throw new Error('field name is reserved');
+    }
+    if (entry.fields.has(name)) {
+        throw new Error('a field with that name already exists');
+    }
 }
 
 function kdbxToRecords(db: Kdbx): IdentifiedRecord[] {

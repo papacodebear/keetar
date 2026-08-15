@@ -22,6 +22,17 @@ export interface PageEntryMatch {
     title: string;
 }
 
+// Captured by the isolated-world content script at interception time (a trusted context) —
+// never reconstructed later from anything the MAIN-world shim or the page itself reports.
+export interface PendingPasskeyRequest {
+    kind: 'create' | 'get';
+    rpId: string;
+    origin: string;
+    challengeBase64: string;
+    create?: { userName: string; userDisplayName: string; userHandleBase64Url: string };
+    get?: { allowCredentialIds?: string[] };
+}
+
 export interface PendingLoginPrompt {
     kind: 'save' | 'update';
     title: string;
@@ -73,6 +84,31 @@ export type KeetarRequest =
     | { type: 'ADD_ATTACHMENT'; entryUuid: string; name: string; dataBase64: string }
     | { type: 'REMOVE_ATTACHMENT'; entryUuid: string; name: string }
     | { type: 'GET_ATTACHMENT'; entryUuid: string; name: string }
+    | { type: 'SET_CUSTOM_FIELD'; entryUuid: string; name: string; value: string; protect: boolean }
+    | { type: 'RENAME_CUSTOM_FIELD'; entryUuid: string; oldName: string; newName: string }
+    | { type: 'REMOVE_CUSTOM_FIELD'; entryUuid: string; name: string }
+    | { type: 'SET_ENTRY_CLONE'; entryUuid: string; sourceEntryUuid: string | undefined }
+    | { type: 'STASH_PASSKEY_REQUEST'; request: PendingPasskeyRequest }
+    | { type: 'GET_PASSKEY_REQUEST'; requestId: string }
+    | { type: 'LIST_PASSKEYS_FOR_RPID'; rpId: string; allowCredentialIds?: string[] }
+    | {
+          type: 'CREATE_PASSKEY';
+          rpId: string;
+          origin: string;
+          userName: string;
+          userHandleBase64Url: string;
+          userDisplayName?: string;
+          entryUuid?: string;
+          createNewEntry?: boolean;
+      }
+    | {
+          type: 'SIGN_PASSKEY_ASSERTION';
+          entryUuid: string;
+          credentialId: string;
+          rpId: string;
+          origin: string;
+          challengeBase64: string;
+      }
     | { type: 'GET_ENTRY_CUSTOM_ICON'; entryUuid: string }
     | { type: 'FETCH_FAVICON_ICON'; entryUuid: string }
     | { type: 'FETCH_MISSING_FAVICONS' }
@@ -124,6 +160,33 @@ export type KeetarResponse =
     | { ok: true; type: 'ADD_ATTACHMENT' }
     | { ok: true; type: 'REMOVE_ATTACHMENT' }
     | { ok: true; type: 'GET_ATTACHMENT'; dataBase64: string }
+    | { ok: true; type: 'SET_CUSTOM_FIELD' }
+    | { ok: true; type: 'RENAME_CUSTOM_FIELD' }
+    | { ok: true; type: 'REMOVE_CUSTOM_FIELD' }
+    | { ok: true; type: 'SET_ENTRY_CLONE' }
+    | { ok: true; type: 'STASH_PASSKEY_REQUEST'; requestId: string }
+    | { ok: true; type: 'GET_PASSKEY_REQUEST'; request: PendingPasskeyRequest | undefined }
+    | {
+          ok: true;
+          type: 'LIST_PASSKEYS_FOR_RPID';
+          passkeys: { entryUuid: string; entryTitle: string; credentialId: string }[];
+      }
+    | {
+          ok: true;
+          type: 'CREATE_PASSKEY';
+          entryUuid: string;
+          credentialId: string;
+          publicKeyCoseBase64: string;
+          attestationObjectBase64: string;
+      }
+    | {
+          ok: true;
+          type: 'SIGN_PASSKEY_ASSERTION';
+          signatureBase64: string;
+          authenticatorDataBase64: string;
+          userHandleBase64Url: string;
+          signCount: number;
+      }
     | { ok: true; type: 'GET_ENTRY_CUSTOM_ICON'; dataBase64: string }
     | { ok: true; type: 'FETCH_FAVICON_ICON' }
     | { ok: true; type: 'FETCH_MISSING_FAVICONS'; updated: number; failed: number; skipped: number }

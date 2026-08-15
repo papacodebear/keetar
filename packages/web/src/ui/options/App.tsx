@@ -20,6 +20,7 @@ import { VaultProviderIcon } from '../shared/VaultProviderIcon';
 import { GeneratorOptionsForm, type GeneratorMode } from '../shared/GeneratorOptionsForm';
 import { getGeneratorPreferences, setGeneratorPreferences } from '../../config/generator-config';
 import type { GeneratorPreferences } from '../../config/generator-config';
+import { isPasskeyInterceptionEnabled, setPasskeyInterceptionEnabled } from '../../config/passkey-config';
 
 // Setup & config without vault unlock; owns backend setup and biometric enrollment (§8.1–8.2).
 
@@ -292,7 +293,36 @@ function DatabaseSection({
                     <BiometricSection vault={vault} enrolled={enrolled} onChanged={onChanged} />
                 </>
             )}
+            <h2>Passkeys</h2>
+            <PasskeySection />
         </section>
+    );
+}
+
+function PasskeySection() {
+    const [enabled, setEnabled] = useState<boolean | undefined>(undefined);
+
+    useEffect(() => {
+        void isPasskeyInterceptionEnabled().then(setEnabled);
+    }, []);
+
+    async function toggle(next: boolean): Promise<void> {
+        setEnabled(next);
+        await setPasskeyInterceptionEnabled(next);
+    }
+
+    if (enabled === undefined) {
+        return null;
+    }
+
+    return (
+        <div>
+            <label>
+                <input type="checkbox" checked={enabled} onChange={(e) => void toggle(e.target.checked)} /> Let Keetar
+                offer to create and sign in with passkeys on websites
+            </label>
+            <p className="hint">Reload any open tabs after changing this for it to take effect.</p>
+        </div>
     );
 }
 

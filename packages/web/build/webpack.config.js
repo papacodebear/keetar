@@ -111,6 +111,38 @@ export default (env, argv) => {
             mode
         },
         {
+            // MAIN-world monkey-patch of navigator.credentials — must be its own bundle since it
+            // runs in the page's own JS realm, not the isolated content-script world.
+            name: 'passkey-shim',
+            entry: path.join(rootDir, 'src/passkey-provider/page-shim.ts'),
+            output: { path: outputPath, filename: 'passkey-shim.js' },
+            target: 'web',
+            resolve: { extensions: ['.tsx', '.ts', '.js'] },
+            module: { rules: [tsRule] },
+            devtool,
+            mode
+        },
+        {
+            name: 'passkey-prompt',
+            entry: path.join(rootDir, 'src/ui/passkey-prompt/index.tsx'),
+            output: { path: outputPath, filename: 'passkey-prompt/index.js' },
+            target: 'web',
+            resolve: { extensions: ['.tsx', '.ts', '.js'] },
+            module: { rules: [tsRule] },
+            plugins: [
+                new CopyPlugin({
+                    patterns: [
+                        {
+                            from: path.join(rootDir, 'src/ui/passkey-prompt/passkey-prompt.html'),
+                            to: 'passkey-prompt/passkey-prompt.html'
+                        }
+                    ]
+                })
+            ],
+            devtool,
+            mode
+        },
+        {
             name: 'popup',
             entry: path.join(rootDir, 'src/ui/popup/index.tsx'),
             output: { path: outputPath, filename: 'popup/index.js' },

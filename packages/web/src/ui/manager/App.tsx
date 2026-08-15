@@ -6,6 +6,7 @@ import { VaultProviderIcon } from '../shared/VaultProviderIcon';
 import { PasswordGeneratorPanel } from '../shared/PasswordGeneratorPanel';
 import { PianoKeysWatermark } from '../shared/PianoKeysWatermark';
 import { buildAiSortExport, diffAiSortAssignments, parseAiSortResponse } from './ai-sort';
+import { CustomFieldsSection } from './CustomFieldsSection';
 import { getSortedEntryUuids, markEntriesSorted } from './ai-sort-tracker';
 import { connectGoogleDrive, getAccessToken, GoogleDriveProvider } from '../../providers/gdrive';
 import { showDrivePicker } from '../../providers/gdrive-picker';
@@ -1488,6 +1489,13 @@ function EntryDetailPanel({
         onChanged();
     }
 
+    async function cloneFrom(sourceEntryUuid: string | undefined): Promise<void> {
+        await sendToBackground({ type: 'SET_ENTRY_CLONE', entryUuid, sourceEntryUuid });
+        await load();
+        flashSaved();
+        onChanged();
+    }
+
     async function addAttachment(file: File): Promise<void> {
         const buffer = await file.arrayBuffer();
         const dataBase64 = ByteUtils.bytesToBase64(new Uint8Array(buffer));
@@ -1565,19 +1573,40 @@ function EntryDetailPanel({
             <div className="field">
                 <label>Username</label>
                 <input
+                    key={entry.clonedFromEntryUuid ?? 'own-username'}
                     type="text"
                     defaultValue={entry.username}
+                    disabled={!!entry.clonedFromEntryUuid}
                     onBlur={(e) => void saveField('username', e.target.value)}
                 />
             </div>
             <div className="field">
                 <label>Password</label>
                 <PasswordEditor
+                    key={entry.clonedFromEntryUuid ?? 'own-password'}
                     initialPassword={entry.password}
                     showPassword={showPassword}
+                    disabled={!!entry.clonedFromEntryUuid}
                     onToggleVisibility={() => setShowPassword((visible) => !visible)}
                     onSave={(password) => saveField('password', password)}
                 />
+            </div>
+            <div className="field">
+                <label>Clones</label>
+                <select value={entry.clonedFromEntryUuid ?? ''} onChange={(e) => void cloneFrom(e.target.value || undefined)}>
+                    <option value="">(none — own username/password)</option>
+                    {sortByName(
+                        flattenEntries(root).filter((e) => e.uuid !== entry.uuid),
+                        (e) => e.title
+                    ).map((e) => (
+                        <option key={e.uuid} value={e.uuid}>
+                            {e.title || '(untitled)'}
+                        </option>
+                    ))}
+                </select>
+                {entry.clonedFromEntryUuid && (
+                    <p className="hint">Username and password are shared live from that entry.</p>
+                )}
             </div>
             <div className="field">
                 <label>URL</label>
@@ -1641,6 +1670,8 @@ function EntryDetailPanel({
                 />
             </div>
 
+            <CustomFieldsSection entryUuid={entry.uuid} customFields={entry.customFields} onChanged={() => void load()} />
+
             <p style={{ marginTop: '1rem' }}>
                 {savedFlash && <span className="save-indicator">Saved</span>}
             </p>
@@ -1657,12 +1688,14 @@ function PasswordEditor({
     initialPassword,
     showPassword,
     onToggleVisibility,
-    onSave
+    onSave,
+    disabled = false
 }: {
     initialPassword: string;
     showPassword: boolean;
     onToggleVisibility: () => void;
     onSave: (password: string) => Promise<void>;
+    disabled?: boolean;
 }) {
     const [password, setPassword] = useState(initialPassword);
     const [entropy, setEntropy] = useState<number | undefined>(undefined);
@@ -1701,15 +1734,18 @@ function PasswordEditor({
                 <input
                     type={showPassword ? 'text' : 'password'}
                     value={password}
+                    disabled={disabled}
                     onChange={(e) => setPassword(e.target.value)}
                     onBlur={() => void onSave(password)}
                 />
                 <button type="button" onClick={onToggleVisibility}>
                     {showPassword ? 'Hide' : 'Show'}
                 </button>
-                <button type="button" title="Generate password" aria-label="Generate password" onClick={() => setShowGenerator((v) => !v)}>
-                    🎲
-                </button>
+                {!disabled && (
+                    <button type="button" title="Generate password" aria-label="Generate password" onClick={() => setShowGenerator((v) => !v)}>
+                        🎲
+                    </button>
+                )}
                 {showGenerator && (
                     <div className="password-generator-popover">
                         <PasswordGeneratorPanel

@@ -5,6 +5,7 @@ import { EntryIcon } from '../shared/EntryIcon';
 import { VaultProviderIcon } from '../shared/VaultProviderIcon';
 import { PasswordGeneratorPanel } from '../shared/PasswordGeneratorPanel';
 import { PianoKeysWatermark } from '../shared/PianoKeysWatermark';
+import { ErrorBox } from '../shared/ErrorBox';
 import { buildAiSortExport, diffAiSortAssignments, parseAiSortResponse } from './ai-sort';
 import { CustomFieldsSection } from './CustomFieldsSection';
 import { getSortedEntryUuids, markEntriesSorted } from './ai-sort-tracker';
@@ -498,7 +499,7 @@ function Ready({
                                 Close
                             </button>
                         </div>
-                        <p className="empty-state">{healthError}</p>
+                        <ErrorBox message={healthError} />
                     </>
                 ) : (
                     <>
@@ -716,7 +717,7 @@ function PasswordHealthPanel({
                             </button>
                         </>
                     )}
-                    {duplicateError && <p className="empty-state">{duplicateError}</p>}
+                    {duplicateError && <ErrorBox message={duplicateError} />}
                 </div>
             )}
             <p>
@@ -877,7 +878,7 @@ function AiSortPanel({
                     Preview changes
                 </button>
             </div>
-            {error && <p className="empty-state">{error}</p>}
+            {error && <ErrorBox message={error} />}
             {status && <p style={{ marginTop: '1rem' }}>{status}</p>}
             {diff &&
                 (totalChanges === 0 ? (
@@ -1261,7 +1262,7 @@ function CombineVaultsPanel({
                 </p>
             )}
 
-            {error && <p className="empty-state">{error}</p>}
+            {error && <ErrorBox message={error} />}
         </div>
     );
 }

@@ -15,6 +15,10 @@ import { VaultProviderIcon } from '../shared/VaultProviderIcon';
 import { PasswordGeneratorPanel } from '../shared/PasswordGeneratorPanel';
 import { tabs } from '../../platform';
 import { ensureVaultFilePermission } from '../../providers/local-file';
+import { openManagerTab } from '../shared/open-manager';
+import { ErrorBox } from '../shared/ErrorBox';
+import { scheduleClipboardClear } from '../../background/clipboard-clear';
+import { isHostTrusted, trustHost } from '../../config/trusted-hosts';
 
 // Quick access post-unlock: search, copy, fill (§8.1–8.2); also runs WebAuthn unlock ceremony (§6.2).
 
@@ -179,7 +183,7 @@ export function App() {
         case 'error':
             return (
                 <div className="panel">
-                    <p className="error">{view.message}</p>
+                    <ErrorBox message={view.message} />
                     <button type="button" onClick={() => void refresh()}>
                         Try again
                     </button>
@@ -313,6 +317,14 @@ async function fillActiveTab(
     await chrome.tabs.sendMessage(tab.id, message);
 }
 
+function safeOrigin(url: string): string | undefined {
+    try {
+        return new URL(url).origin;
+    } catch {
+        return undefined;
+    }
+}
+
 async function redetectActiveTab(): Promise<void> {
     const [tab] = await tabs.query({ active: true, currentWindow: true });
     if (tab?.id === undefined) {
@@ -406,7 +418,7 @@ function LockedView({
             <button type="submit" disabled={busy || !password}>
                 Unlock
             </button>
-            {error && <p className="error">{error}</p>}
+            {error && <ErrorBox message={error} />}
             {code === 'SYNC_CONFLICT' && (
                 <button type="button" onClick={() => chrome.runtime.openOptionsPage()}>
                     Resolve in Options
@@ -439,6 +451,7 @@ function UnlockedView({
 }) {
     const [toast, setToast] = useState('');
     const [showGenerator, setShowGenerator] = useState(false);
+    const [pendingTrust, setPendingTrust] = useState<{ origin: string; run: () => Promise<void> } | undefined>(undefined);
     const matchedEntries = entries.filter((entry) => matchedUuids.has(entry.uuid));
 
     function showToast(message: string): void {
@@ -446,10 +459,32 @@ function UnlockedView({
         setTimeout(() => setToast(''), 1500);
     }
 
+    // Gate any fill-into-page action on the active tab's host being trusted first (§ Options item 9).
+    async function withHostTrust(run: () => Promise<void>): Promise<void> {
+        const [tab] = await tabs.query({ active: true, currentWindow: true });
+        const origin = tab?.url ? safeOrigin(tab.url) : undefined;
+        if (!origin || (await isHostTrusted(origin))) {
+            await run();
+            return;
+        }
+        setPendingTrust({ origin, run });
+    }
+
+    async function confirmTrust(): Promise<void> {
+        if (!pendingTrust) {
+            return;
+        }
+        const { origin, run } = pendingTrust;
+        await trustHost(origin);
+        setPendingTrust(undefined);
+        await run();
+    }
+
     async function copyField(entryUuid: string, field: EntryFieldName, label: string): Promise<void> {
         const response = await sendToBackground({ type: 'GET_ENTRY_FIELD', entryUuid, field });
         if (response.ok && response.type === 'GET_ENTRY_FIELD') {
             await navigator.clipboard.writeText(response.value);
+            void scheduleClipboardClear(response.value);
             showToast(`${label} copied`);
         }
     }
@@ -459,14 +494,16 @@ function UnlockedView({
     }
 
     async function fill(entryUuid: string): Promise<void> {
-        const [usernameRes, passwordRes] = await Promise.all([
-            sendToBackground({ type: 'GET_ENTRY_FIELD', entryUuid, field: 'username' }),
-            sendToBackground({ type: 'GET_ENTRY_FIELD', entryUuid, field: 'password' })
-        ]);
-        const username = usernameRes.ok && usernameRes.type === 'GET_ENTRY_FIELD' ? usernameRes.value : undefined;
-        const password = passwordRes.ok && passwordRes.type === 'GET_ENTRY_FIELD' ? passwordRes.value : undefined;
-        await fillActiveTab(username, password, undefined);
-        showToast('Filled');
+        await withHostTrust(async () => {
+            const [usernameRes, passwordRes] = await Promise.all([
+                sendToBackground({ type: 'GET_ENTRY_FIELD', entryUuid, field: 'username' }),
+                sendToBackground({ type: 'GET_ENTRY_FIELD', entryUuid, field: 'password' })
+            ]);
+            const username = usernameRes.ok && usernameRes.type === 'GET_ENTRY_FIELD' ? usernameRes.value : undefined;
+            const password = passwordRes.ok && passwordRes.type === 'GET_ENTRY_FIELD' ? passwordRes.value : undefined;
+            await fillActiveTab(username, password, undefined);
+            showToast('Filled');
+        });
     }
 
     async function redetectFields(): Promise<void> {
@@ -482,34 +519,25 @@ function UnlockedView({
         const response = await sendToBackground({ type: 'GET_ENTRY_TOTP', entryUuid });
         if (response.ok && response.type === 'GET_ENTRY_TOTP') {
             await navigator.clipboard.writeText(response.code);
+            void scheduleClipboardClear(response.code);
             showToast(`${response.code} copied`);
         }
     }
 
     async function fillTotp(entryUuid: string): Promise<void> {
-        const response = await sendToBackground({ type: 'GET_ENTRY_TOTP', entryUuid });
-        if (response.ok && response.type === 'GET_ENTRY_TOTP') {
-            await fillActiveTab(undefined, undefined, response.code);
-            showToast('OTP filled');
-        }
+        await withHostTrust(async () => {
+            const response = await sendToBackground({ type: 'GET_ENTRY_TOTP', entryUuid });
+            if (response.ok && response.type === 'GET_ENTRY_TOTP') {
+                await fillActiveTab(undefined, undefined, response.code);
+                showToast('OTP filled');
+            }
+        });
     }
 
     // Manager owns editing; reuse its existing tab when possible (§8.1–8.2).
     async function openManager(entryUuid?: string): Promise<void> {
         await openManagerTab(entryUuid);
         window.close();
-    }
-
-    async function openManagerTab(entryUuid?: string): Promise<void> {
-        const managerUrl = chrome.runtime.getURL('manager/manager.html');
-        const url = entryUuid ? `${managerUrl}?${new URLSearchParams({ entry: entryUuid })}` : managerUrl;
-        const openTabs = await tabs.query({});
-        const existingManagerTab = openTabs.find((tab) => tab.url?.split(/[?#]/, 1)[0] === managerUrl);
-        if (existingManagerTab?.id !== undefined) {
-            await tabs.update(existingManagerTab.id, { active: true, url });
-            return;
-        }
-        await chrome.tabs.create({ url });
     }
 
     return (
@@ -526,6 +554,13 @@ function UnlockedView({
                     prompt={pendingLoginPrompt}
                     tabId={activeTabId}
                     onHandled={onLoginPromptHandled}
+                />
+            )}
+            {pendingTrust && (
+                <TrustHostPromptCard
+                    origin={pendingTrust.origin}
+                    onTrust={() => void confirmTrust()}
+                    onCancel={() => setPendingTrust(undefined)}
                 />
             )}
             <div className="toolbar">
@@ -656,7 +691,32 @@ function PendingLoginPromptCard({
                     Not now
                 </button>
             </div>
-            {error && <p className="error">{error}</p>}
+            {error && <ErrorBox message={error} />}
+        </div>
+    );
+}
+
+function TrustHostPromptCard({
+    origin,
+    onTrust,
+    onCancel
+}: {
+    origin: string;
+    onTrust: () => void;
+    onCancel: () => void;
+}) {
+    return (
+        <div className="login-prompt">
+            <strong>Trust {new URL(origin).hostname}?</strong>
+            <span className="login-prompt-detail">Keetar only fills credentials into sites you've trusted.</span>
+            <div className="login-prompt-actions">
+                <button type="button" onClick={onTrust}>
+                    Trust &amp; Fill
+                </button>
+                <button type="button" onClick={onCancel}>
+                    Cancel
+                </button>
+            </div>
         </div>
     );
 }

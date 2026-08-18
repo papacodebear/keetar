@@ -47,6 +47,8 @@ export type KeetarRequest =
     | { type: 'UNLOCK_VAULT_WITH_HASH'; uuid: string; passwordHashBase64: string }
     | { type: 'LOCK_VAULT' }
     | { type: 'GET_STATUS' }
+    | { type: 'SET_AUTO_LOCK_TIMEOUT'; seconds: number }
+    | { type: 'SCHEDULE_CLIPBOARD_CLEAR'; valueHashBase64: string; delaySeconds: number }
     | { type: 'LIST_ENTRIES' }
     // Password matching happens in the background — passwords never enter Popup's state (§8.2).
     | { type: 'SEARCH_ENTRIES'; query: string }
@@ -131,6 +133,8 @@ export type KeetarResponse =
     | { ok: true; type: 'UNLOCK_VAULT_WITH_HASH'; summary: VaultSummary }
     | { ok: true; type: 'LOCK_VAULT' }
     | { ok: true; type: 'GET_STATUS'; status: 'locked' | 'unlocked' }
+    | { ok: true; type: 'SET_AUTO_LOCK_TIMEOUT' }
+    | { ok: true; type: 'SCHEDULE_CLIPBOARD_CLEAR' }
     | { ok: true; type: 'LIST_ENTRIES'; entries: EntrySummary[] }
     | { ok: true; type: 'SEARCH_ENTRIES'; entries: EntrySummary[] }
     | { ok: true; type: 'GET_ENTRY_FIELD'; value: string }

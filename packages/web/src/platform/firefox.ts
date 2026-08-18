@@ -1,4 +1,6 @@
 // Firefox MV2 shim: persistent background page with promise-based browser.* APIs (§9.2).
+import { ByteUtils } from '@keetar/core';
+
 declare const browser: {
     storage: {
         local: {
@@ -25,6 +27,7 @@ declare const browser: {
     browserAction: {
         setBadgeText(details: { tabId: number; text: string }): Promise<void>;
         setBadgeBackgroundColor(details: { tabId: number; color: string }): Promise<void>;
+        setIcon(details: { path: Record<string, string> }): Promise<void>;
     };
     runtime: {
         sendMessage(message: unknown): Promise<unknown>;
@@ -36,6 +39,9 @@ declare const browser: {
         onRemoved: {
             addListener(callback: (tabId: number) => void): void;
         };
+    };
+    windows: {
+        update(windowId: number, updateInfo: chrome.windows.UpdateInfo): Promise<chrome.windows.Window>;
     };
 };
 
@@ -108,6 +114,31 @@ export const tabs = {
     }
 };
 
+// Raises an existing window when reusing a tab in it (tabs.update alone only activates within its own window).
+export const windows = {
+    update(windowId: number, updateInfo: chrome.windows.UpdateInfo): Promise<chrome.windows.Window> {
+        return browser.windows.update(windowId, updateInfo);
+    }
+};
+
+// Firefox's MV2 background page is a real (if hidden) document, unlike Chrome's service worker —
+// no offscreen-document workaround needed to reach navigator.clipboard from here.
+export const clipboard = {
+    async clearIfMatches(valueHashBase64: string): Promise<void> {
+        try {
+            const current = await navigator.clipboard.readText();
+            const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(current));
+            const currentHashBase64 = ByteUtils.bytesToBase64(new Uint8Array(digest));
+            if (currentHashBase64 === valueHashBase64) {
+                await navigator.clipboard.writeText('');
+            }
+        } catch {
+            // readText unsupported/denied from this context — clear blindly rather than never at all.
+            await navigator.clipboard.writeText('');
+        }
+    }
+};
+
 // browser.identity.launchWebAuthFlow rejects on cancel (handled same as chrome.ts; §7.3).
 export const identity = {
     getRedirectURL(path?: string): string {
@@ -125,5 +156,8 @@ export const action = {
     },
     setBadgeBackgroundColor(details: { tabId: number; color: string }): Promise<void> {
         return browser.browserAction.setBadgeBackgroundColor(details);
+    },
+    setIcon(details: { path: Record<string, string> }): Promise<void> {
+        return browser.browserAction.setIcon(details);
     }
 };

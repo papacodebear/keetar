@@ -13,6 +13,9 @@ import { startKeepalive } from './keepalive';
 import { action, idle, sessionStorage, tabs } from '../platform';
 import { matchEntries } from '../autofill/matcher';
 import { hasCompleteCapturedLogin, mergeCapturedLogin, type CapturedLogin } from './login-capture';
+import { getConfiguredVault } from '../config/vault-config';
+import { getAutoLockTimeoutSeconds, setAutoLockTimeoutSeconds } from '../config/security-config';
+import { armClipboardClear } from './clipboard-clear';
 
 // Entry point — registers listeners, initialises session (§2.4).
 
@@ -20,12 +23,26 @@ installArgon2();
 startKeepalive();
 void preloadPasswordStrength();
 
-// Idle timeout (§3.4): lock on "locked" or "idle" state. 5 min default.
-const DEFAULT_IDLE_TIMEOUT_SECONDS = 5 * 60;
+// Idle timeout (§3.4): lock on "locked" or "idle" state. Interval itself is configurable (security-config.ts).
 const PENDING_LOGIN_STORAGE_KEY = 'keetar.pendingLoginCaptures';
 const PENDING_LOGIN_BADGE_COLOR = '#dc2626';
 const DEFAULT_BADGE_COLOR = '#2563eb';
 type PendingLoginCaptures = Record<string, CapturedLogin>;
+
+// Toolbar icon (§ Options item 12): grey unless a vault is both configured and actually unlocked.
+const ICON_SIZES = [16, 32, 48, 128] as const;
+function iconPaths(suffix: '' | '-gray'): Record<string, string> {
+    return Object.fromEntries(ICON_SIZES.map((size) => [String(size), `icons/keetar-${size}${suffix}.png`]));
+}
+const COLOR_ICON = iconPaths('');
+const GRAY_ICON = iconPaths('-gray');
+
+async function updateToolbarIcon(): Promise<void> {
+    const configured = await getConfiguredVault();
+    const connected = Boolean(configured) && vaultSession.status === 'unlocked';
+    await action.setIcon({ path: connected ? COLOR_ICON : GRAY_ICON });
+}
+void updateToolbarIcon();
 
 // Bridges content-relay (stashes) to the passkey-prompt iframe (fetches) — lives only for the
 // few seconds between interception and the prompt loading, so an in-memory map is enough.
@@ -141,10 +158,11 @@ tabs.onRemoved((tabId) => {
     void clearCapturedLogin(tabId);
 });
 
-idle.setDetectionInterval(DEFAULT_IDLE_TIMEOUT_SECONDS);
+void getAutoLockTimeoutSeconds().then((seconds) => idle.setDetectionInterval(seconds));
 idle.onStateChanged((state) => {
     if ((state === 'idle' || state === 'locked') && vaultSession.status === 'unlocked') {
         vaultSession.lock();
+        void updateToolbarIcon();
     }
 });
 
@@ -152,18 +170,29 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
     switch (request.type) {
         case 'UNLOCK_VAULT': {
             const summary = await vaultSession.unlock(request.uuid, request.password);
+            void updateToolbarIcon();
             return { ok: true, type: 'UNLOCK_VAULT', summary };
         }
         case 'UNLOCK_VAULT_WITH_HASH': {
             const passwordHash = ByteUtils.arrayToBuffer(ByteUtils.base64ToBytes(request.passwordHashBase64));
             const summary = await vaultSession.unlockWithHash(request.uuid, passwordHash);
+            void updateToolbarIcon();
             return { ok: true, type: 'UNLOCK_VAULT_WITH_HASH', summary };
         }
         case 'LOCK_VAULT':
             vaultSession.lock();
+            void updateToolbarIcon();
             return { ok: true, type: 'LOCK_VAULT' };
         case 'GET_STATUS':
             return { ok: true, type: 'GET_STATUS', status: vaultSession.status };
+        case 'SET_AUTO_LOCK_TIMEOUT': {
+            await setAutoLockTimeoutSeconds(request.seconds);
+            idle.setDetectionInterval(await getAutoLockTimeoutSeconds());
+            return { ok: true, type: 'SET_AUTO_LOCK_TIMEOUT' };
+        }
+        case 'SCHEDULE_CLIPBOARD_CLEAR':
+            await armClipboardClear(request.valueHashBase64, request.delaySeconds);
+            return { ok: true, type: 'SCHEDULE_CLIPBOARD_CLEAR' };
         case 'LIST_ENTRIES':
             return { ok: true, type: 'LIST_ENTRIES', entries: vaultSession.listEntries() };
         case 'SEARCH_ENTRIES':

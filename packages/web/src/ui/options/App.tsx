@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ByteUtils } from '@keetar/core';
-import { createVaultFile, ensureVaultFilePermission, pickVaultFile } from '../../providers/local-file';
+import { createVaultFile, ensureVaultFilePermission, pickVaultFile, relinkVaultFile } from '../../providers/local-file';
+import { openManagerTab } from '../shared/open-manager';
+import { ErrorBox } from '../shared/ErrorBox';
 import {
     clearConfiguredVault,
     getConfiguredVault,
@@ -21,10 +23,22 @@ import { GeneratorOptionsForm, type GeneratorMode } from '../shared/GeneratorOpt
 import { getGeneratorPreferences, setGeneratorPreferences } from '../../config/generator-config';
 import type { GeneratorPreferences } from '../../config/generator-config';
 import { isPasskeyInterceptionEnabled, setPasskeyInterceptionEnabled } from '../../config/passkey-config';
+import { getAutoLockTimeoutSeconds, MIN_AUTO_LOCK_TIMEOUT_SECONDS } from '../../config/security-config';
+import { getClipboardClearSeconds, setClipboardClearSeconds } from '../../config/clipboard-config';
+import { listTrustedHosts, revokeHost, type TrustedHost } from '../../config/trusted-hosts';
 
 // Setup & config without vault unlock; owns backend setup and biometric enrollment (§8.1–8.2).
 
 type EntryMode = 'idle' | 'open' | 'create';
+
+const SECTIONS = [
+    { id: 'database', label: 'Database' },
+    { id: 'biometric', label: 'Biometric unlock' },
+    { id: 'passkeys', label: 'Passkeys' },
+    { id: 'security', label: 'Security' },
+    { id: 'trusted-sites', label: 'Trusted sites' },
+    { id: 'generator', label: 'Password generator' }
+] as const;
 
 // Verify Google Drive token is live before offering picker (not just cached).
 async function ensureGoogleDriveAuthorized(): Promise<void> {
@@ -64,6 +78,7 @@ export function App() {
     }
 
     async function useDifferentVault(): Promise<void> {
+        await sendToBackground({ type: 'LOCK_VAULT' });
         await clearConfiguredVault();
         await refresh();
     }
@@ -75,36 +90,223 @@ export function App() {
     return (
         <div>
             <h1>Keetar</h1>
+            <div className="options-layout">
+                <SectionNav />
+                <div className="options-content">
+                    <section id="database">
+                        <h2>Database</h2>
+                        {vault ? (
+                            <DatabaseSection
+                                vault={vault}
+                                enrolled={enrolled}
+                                onChanged={refresh}
+                                onDisconnect={() => void useDifferentVault()}
+                            />
+                        ) : mode === 'idle' ? (
+                            <div className="choice-buttons">
+                                <button type="button" onClick={() => setMode('open')}>
+                                    Open Existing Database
+                                </button>
+                                <button type="button" onClick={() => setMode('create')}>
+                                    Create New Database
+                                </button>
+                            </div>
+                        ) : mode === 'open' ? (
+                            <OpenVaultFlow onOpened={opened} onCancel={() => setMode('idle')} />
+                        ) : (
+                            <CreateVaultFlow
+                                gdriveConnected={gdriveConnected}
+                                onGdriveConnectedChange={setGdriveConnected}
+                                onCreated={opened}
+                                onCancel={() => setMode('idle')}
+                            />
+                        )}
+                    </section>
 
-            {vault ? (
-                <DatabaseSection
-                    vault={vault}
-                    enrolled={enrolled}
-                    onChanged={refresh}
-                    onDisconnect={() => void useDifferentVault()}
-                />
-            ) : mode === 'idle' ? (
-                <div className="choice-buttons">
-                    <button type="button" onClick={() => setMode('open')}>
-                        Open Existing Database
-                    </button>
-                    <button type="button" onClick={() => setMode('create')}>
-                        Create New Database
-                    </button>
+                    <section id="biometric">
+                        <h2>Biometric unlock</h2>
+                        <BiometricUnlockSection vault={vault} enrolled={enrolled} onChanged={refresh} />
+                    </section>
+
+                    <section id="passkeys">
+                        <h2>Passkeys</h2>
+                        <PasskeySection />
+                    </section>
+
+                    <section id="security">
+                        <SecuritySection />
+                    </section>
+
+                    <section id="trusted-sites">
+                        <TrustedHostsSection />
+                    </section>
+
+                    <section id="generator">
+                        <GeneratorPreferencesSection />
+                    </section>
                 </div>
-            ) : mode === 'open' ? (
-                <OpenVaultFlow onOpened={opened} onCancel={() => setMode('idle')} />
-            ) : (
-                <CreateVaultFlow
-                    gdriveConnected={gdriveConnected}
-                    onGdriveConnectedChange={setGdriveConnected}
-                    onCreated={opened}
-                    onCancel={() => setMode('idle')}
-                />
-            )}
-
-            <GeneratorPreferencesSection />
+            </div>
         </div>
+    );
+}
+
+// Threshold-based rather than IntersectionObserver: a section near the end of a short page may
+// never have room to scroll into a fixed "top zone", which left the previous item stuck active.
+const ACTIVE_SECTION_THRESHOLD_PX = 96;
+
+function computeActiveSection(): string {
+    const atBottom = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2;
+    if (atBottom) {
+        return SECTIONS[SECTIONS.length - 1].id;
+    }
+    let current: string = SECTIONS[0].id;
+    for (const { id } of SECTIONS) {
+        const el = document.getElementById(id);
+        if (el && el.getBoundingClientRect().top <= ACTIVE_SECTION_THRESHOLD_PX) {
+            current = id;
+        }
+    }
+    return current;
+}
+
+// Highlights the section nearest the top of the viewport as the user scrolls (§ Options nav redesign).
+function SectionNav() {
+    const [active, setActive] = useState<string>(SECTIONS[0].id);
+
+    useEffect(() => {
+        function onScroll(): void {
+            setActive(computeActiveSection());
+        }
+        onScroll();
+        window.addEventListener('scroll', onScroll, { passive: true });
+        window.addEventListener('resize', onScroll);
+        return () => {
+            window.removeEventListener('scroll', onScroll);
+            window.removeEventListener('resize', onScroll);
+        };
+    }, []);
+
+    return (
+        <nav className="options-nav">
+            {SECTIONS.map(({ id, label }) => (
+                <a
+                    key={id}
+                    href={`#${id}`}
+                    className={id === active ? 'active' : undefined}
+                    onClick={() => setActive(id)}
+                >
+                    {label}
+                </a>
+            ))}
+        </nav>
+    );
+}
+
+// Auto-lock timeout and clipboard auto-clear — global preferences, independent of any vault.
+function SecuritySection() {
+    const [autoLockMinutes, setAutoLockMinutes] = useState<number | undefined>(undefined);
+    const [clipboardClearSeconds, setClipboardClearSecondsState] = useState<number | undefined>(undefined);
+    const [saved, setSaved] = useState(false);
+
+    useEffect(() => {
+        void getAutoLockTimeoutSeconds().then((seconds) => setAutoLockMinutes(seconds / 60));
+        void getClipboardClearSeconds().then(setClipboardClearSecondsState);
+    }, []);
+
+    async function handleSave(): Promise<void> {
+        if (autoLockMinutes === undefined || clipboardClearSeconds === undefined) {
+            return;
+        }
+        const seconds = Math.max(MIN_AUTO_LOCK_TIMEOUT_SECONDS, Math.round(autoLockMinutes * 60));
+        await sendToBackground({ type: 'SET_AUTO_LOCK_TIMEOUT', seconds });
+        await setClipboardClearSeconds(clipboardClearSeconds);
+        setAutoLockMinutes(seconds / 60);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 1500);
+    }
+
+    if (autoLockMinutes === undefined || clipboardClearSeconds === undefined) {
+        return null;
+    }
+
+    return (
+        <>
+            <h2>Security</h2>
+            <div className="field-inline">
+                <label>
+                    Lock the vault after being idle for
+                    <input
+                        type="number"
+                        min={MIN_AUTO_LOCK_TIMEOUT_SECONDS / 60}
+                        step="1"
+                        value={autoLockMinutes}
+                        onChange={(e) => setAutoLockMinutes(Number(e.target.value))}
+                    />
+                    minutes
+                </label>
+            </div>
+            <div className="field-inline">
+                <label>
+                    Clear the clipboard
+                    <input
+                        type="number"
+                        min={0}
+                        step="1"
+                        value={clipboardClearSeconds}
+                        onChange={(e) => setClipboardClearSecondsState(Number(e.target.value))}
+                    />
+                    seconds after copying a password or code (0 = never)
+                </label>
+            </div>
+            <button type="button" onClick={() => void handleSave()}>
+                Save
+            </button>
+            {saved && <span className="success">Saved</span>}
+        </>
+    );
+}
+
+// Hosts trusted to receive autofilled credentials (§ Options item 9) — trusted once from the
+// popup/content-script prompt, revocable here.
+function TrustedHostsSection() {
+    const [hosts, setHosts] = useState<TrustedHost[] | undefined>(undefined);
+
+    async function refresh(): Promise<void> {
+        setHosts(await listTrustedHosts());
+    }
+
+    useEffect(() => {
+        void refresh();
+    }, []);
+
+    async function revoke(domain: string): Promise<void> {
+        await revokeHost(domain);
+        await refresh();
+    }
+
+    if (!hosts) {
+        return null;
+    }
+
+    return (
+        <>
+            <h2>Trusted sites</h2>
+            <p className="hint">Sites Keetar is allowed to autofill credentials into. Revoke to require confirmation again.</p>
+            {hosts.length === 0 ? (
+                <p className="hint">No sites trusted yet.</p>
+            ) : (
+                <ul className="trusted-hosts-list">
+                    {hosts.map((host) => (
+                        <li key={host.domain}>
+                            <span>{host.domain}</span>
+                            <button type="button" onClick={() => void revoke(host.domain)}>
+                                Revoke
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </>
     );
 }
 
@@ -131,7 +333,7 @@ function GeneratorPreferencesSection() {
     }
 
     return (
-        <section>
+        <>
             <h2>Password Generator</h2>
             <p className="hint">Defaults used each time the password generator opens in Manager or the popup.</p>
             <GeneratorOptionsForm
@@ -146,7 +348,7 @@ function GeneratorPreferencesSection() {
                 Save
             </button>
             {saved && <span className="success">Saved</span>}
-        </section>
+        </>
     );
 }
 
@@ -162,8 +364,6 @@ function DatabaseSection({
     onChanged: () => Promise<void>;
     onDisconnect: () => void;
 }) {
-    // Biometric enrollment hidden behind gear; other controls always visible.
-    const [showBiometric, setShowBiometric] = useState(false);
     const [pickBusy, setPickBusy] = useState(false);
     const [pickError, setPickError] = useState<string | undefined>(undefined);
     const lockState = useVaultLockState(vault);
@@ -177,7 +377,7 @@ function DatabaseSection({
     }
 
     function openManager(): void {
-        void chrome.tabs.create({ url: chrome.runtime.getURL('manager/manager.html') });
+        void openManagerTab();
     }
 
     // Pick new backing file or recover missing Drive file (reconnect inline if needed).
@@ -198,8 +398,10 @@ function DatabaseSection({
                     path: picked.fileId
                 });
             } else {
-                const { uuid, name } = await pickVaultFile();
-                await setConfiguredVault({ uuid, name, provider: 'local-file' });
+                // Re-link the same vault identity to a new handle — a new uuid here would silently
+                // orphan biometric enrollment (and anything else keyed by this vault's uuid).
+                const { name } = await relinkVaultFile(vault.uuid);
+                await setConfiguredVault({ ...vault, name });
             }
             await onChanged();
         } catch (e) {
@@ -212,7 +414,7 @@ function DatabaseSection({
     }
 
     return (
-        <section>
+        <>
             <div className="vault-badge">
                 <VaultProviderIcon provider={vault.provider} />
                 <span className="vault-badge-text">
@@ -250,16 +452,6 @@ function DatabaseSection({
                 </button>
                 <button
                     type="button"
-                    className="gear-button"
-                    title="Biometric unlock settings"
-                    aria-label="Biometric unlock settings"
-                    aria-pressed={showBiometric}
-                    onClick={() => setShowBiometric((s) => !s)}
-                >
-                    ⚙
-                </button>
-                <button
-                    type="button"
                     className="disconnect-button"
                     title="Disconnect this database"
                     aria-label="Disconnect this database"
@@ -268,10 +460,10 @@ function DatabaseSection({
                     ✕
                 </button>
             </div>
-            {pickError && <p className="error">{pickError}</p>}
+            {pickError && <ErrorBox message={pickError} />}
             {vault.provider === 'gdrive' && sync.status === 'conflict' && (
                 <div className="sync-conflict">
-                    <p className="error">
+                    <p className="hint">
                         This vault changed both here (while offline) and in Google Drive. Choose which copy to keep
                         — the other will be discarded.
                     </p>
@@ -281,22 +473,47 @@ function DatabaseSection({
                     <button type="button" onClick={() => void sync.resolve('keep-cloud')} disabled={sync.busy}>
                         Keep Google Drive's copy
                     </button>
-                    {sync.message && <p className="error">{sync.message}</p>}
+                    {sync.message && <ErrorBox message={sync.message} />}
                 </div>
             )}
             {lockState.status === 'locked' && (
                 <UnlockForm vault={vault} enrolled={enrolled} lockState={lockState} onUnlocked={openManager} />
             )}
-            {showBiometric && (
-                <>
-                    <h2>Biometric unlock</h2>
-                    <BiometricSection vault={vault} enrolled={enrolled} onChanged={onChanged} />
-                </>
-            )}
-            <h2>Passkeys</h2>
-            <PasskeySection />
-        </section>
+        </>
     );
+}
+
+// Wraps BiometricSection with the "no vault yet" grayed-out state (§ Options nav redesign).
+function BiometricUnlockSection({
+    vault,
+    enrolled,
+    onChanged
+}: {
+    vault: ConfiguredVault | undefined;
+    enrolled: boolean;
+    onChanged: () => Promise<void>;
+}) {
+    if (!isWebAuthnSupported()) {
+        return <p className="hint">This browser doesn't support WebAuthn — biometric unlock isn't available.</p>;
+    }
+    if (!vault) {
+        return (
+            <div className="section-disabled">
+                <p className="hint">
+                    Enter the master password once to enroll Touch ID, Windows Hello, or a FIDO2 hardware key for
+                    quick unlock.
+                </p>
+                <div className="field">
+                    <input type="password" placeholder="Master password" disabled />
+                </div>
+                <button type="button" disabled>
+                    Enroll
+                </button>
+                <p className="hint">Select a database above first.</p>
+            </div>
+        );
+    }
+    return <BiometricSection vault={vault} enrolled={enrolled} onChanged={onChanged} />;
 }
 
 function PasskeySection() {
@@ -449,7 +666,7 @@ function UnlockForm({
             <button type="submit" disabled={busy || !password}>
                 Unlock {vault.name}
             </button>
-            {error && <p className="error">{error}</p>}
+            {error && <ErrorBox message={error} />}
         </form>
     );
 }
@@ -584,7 +801,7 @@ function OpenVaultFlow({
             <button type="button" onClick={onCancel} disabled={busy}>
                 Cancel
             </button>
-            {error && <p className="error">{error}</p>}
+            {error && <ErrorBox message={error} />}
         </div>
     );
 }
@@ -717,7 +934,8 @@ function CreateVaultSection({
                     Create vault
                 </button>
             </div>
-            {message && <p className={message.kind}>{message.text}</p>}
+            {message &&
+                (message.kind === 'error' ? <ErrorBox message={message.text} /> : <p className="success">{message.text}</p>)}
         </form>
     );
 }
@@ -735,14 +953,10 @@ function BiometricSection({
     const [busy, setBusy] = useState(false);
     const [message, setMessage] = useState<{ text: string; kind: 'error' | 'success' } | undefined>(undefined);
 
-    if (!isWebAuthnSupported()) {
-        return <p className="hint">This browser doesn't support WebAuthn — biometric unlock isn't available.</p>;
-    }
-
     if (enrolled) {
         return (
             <div>
-                <p className="success">Biometric unlock is enrolled for this vault.</p>
+                <p className="success">Biometric auth enabled.</p>
                 <button type="button" onClick={() => void remove()} disabled={busy}>
                     Remove biometric unlock
                 </button>
@@ -795,7 +1009,8 @@ function BiometricSection({
             <button type="submit" disabled={busy || !password}>
                 Enroll
             </button>
-            {message && <p className={message.kind}>{message.text}</p>}
+            {message &&
+                (message.kind === 'error' ? <ErrorBox message={message.text} /> : <p className="success">{message.text}</p>)}
         </form>
     );
 }

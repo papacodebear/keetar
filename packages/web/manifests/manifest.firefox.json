@@ -55,6 +55,7 @@
     "idle",
     "alarms",
     "clipboardWrite",
+    "clipboardRead",
     "tabs",
     "identity",
     "http://*/*",

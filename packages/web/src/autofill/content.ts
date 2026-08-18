@@ -3,6 +3,7 @@ import { fillField } from './filler';
 import type { ContentScriptMessage } from './messages';
 import { sendToBackground, type PageEntryMatch } from '../background/message-bus';
 import { initPasskeyContentRelay } from '../passkey-provider/content-relay';
+import { isHostTrusted, trustHost } from '../config/trusted-hosts';
 
 // Detect form, signal background, receive fill message (§5.1); never holds credentials.
 
@@ -245,7 +246,81 @@ function hideEntryMenu(): void {
 
 async function fillPageEntry(entryUuid: string): Promise<void> {
     hideEntryMenu();
+    if (!(await isHostTrusted(window.location.origin))) {
+        showTrustPrompt(() => void doFillPageEntry(entryUuid));
+        return;
+    }
+    await doFillPageEntry(entryUuid);
+}
+
+async function doFillPageEntry(entryUuid: string): Promise<void> {
     await sendToBackground({ type: 'FILL_PAGE_ENTRY', entryUuid });
+}
+
+let trustPromptHost: HTMLDivElement | undefined;
+
+function hideTrustPrompt(): void {
+    trustPromptHost?.remove();
+    trustPromptHost = undefined;
+}
+
+// First autofill on a new host asks for confirmation; trusting persists so later fills don't re-prompt.
+function showTrustPrompt(onTrust: () => void): void {
+    hideTrustPrompt();
+    const host = document.createElement('div');
+    const shadow = host.attachShadow({ mode: 'closed' });
+    const backdrop = document.createElement('div');
+    applyStyle(backdrop, {
+        position: 'fixed',
+        inset: '0',
+        zIndex: '2147483647',
+        background: 'rgba(15, 23, 42, 0.45)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: 'system-ui, sans-serif'
+    });
+    const card = document.createElement('div');
+    applyStyle(card, {
+        width: 'min(320px, calc(100vw - 32px))',
+        padding: '16px',
+        borderRadius: '8px',
+        background: '#fff',
+        color: '#111827',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35)'
+    });
+    const heading = document.createElement('p');
+    heading.textContent = `Trust ${window.location.hostname} with your Keetar password?`;
+    applyStyle(heading, { margin: '0 0 6px', fontWeight: '600', fontSize: '14px' });
+    const detail = document.createElement('p');
+    detail.textContent = "Keetar only fills credentials into sites you've trusted. This won't be asked again for this site.";
+    applyStyle(detail, { margin: '0 0 14px', fontSize: '12px', color: '#4b5563' });
+    const actions = document.createElement('div');
+    applyStyle(actions, { display: 'flex', justifyContent: 'flex-end', gap: '8px' });
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.textContent = 'Cancel';
+    applyStyle(cancelButton, { padding: '6px 12px', border: '1px solid #9ca3af', borderRadius: '4px', background: '#fff', cursor: 'pointer' });
+    cancelButton.addEventListener('click', hideTrustPrompt);
+    const trustButton = document.createElement('button');
+    trustButton.type = 'button';
+    trustButton.textContent = 'Trust & Fill';
+    applyStyle(trustButton, { padding: '6px 12px', border: '0', borderRadius: '4px', background: '#2563eb', color: '#fff', cursor: 'pointer' });
+    trustButton.addEventListener('click', () => {
+        hideTrustPrompt();
+        void trustHost(window.location.origin).then(onTrust);
+    });
+    actions.append(cancelButton, trustButton);
+    card.append(heading, detail, actions);
+    backdrop.addEventListener('click', (event) => {
+        if (event.target === backdrop) {
+            hideTrustPrompt();
+        }
+    });
+    backdrop.append(card);
+    shadow.append(backdrop);
+    document.documentElement.append(host);
+    trustPromptHost = host;
 }
 
 initPasskeyContentRelay();

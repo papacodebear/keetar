@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { generatePassword, generatePassphrase } from '@keetar/core';
 import { getGeneratorPreferences, DefaultGeneratorPreferences } from '../../config/generator-config';
 import { GeneratorOptionsForm, type GeneratorMode } from './GeneratorOptionsForm';
+import { scheduleClipboardClear } from '../../background/clipboard-clear';
 
 function CopyIcon() {
     return (
@@ -88,6 +89,7 @@ export function PasswordGeneratorPanel({
             return;
         }
         await navigator.clipboard.writeText(value);
+        void scheduleClipboardClear(value);
         onCopy?.(value);
         setCopied(true);
         setTimeout(() => setCopied(false), 1200);

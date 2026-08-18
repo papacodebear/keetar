@@ -51,7 +51,9 @@
         width: 100%;
       }
       button { font-size: 12px; padding: 0.3rem 0.6rem; cursor: pointer; }
-      .error { color: #c00; margin: 0; }
+      .error-box { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.5rem 0.6rem; border: 1px dashed #c00; border-radius: 6px; }
+      .error-box-title { font-size: 0.85em; font-weight: 700; color: #c00; }
+      .error-box-message { margin: 0; font-size: 0.8em; color: #c00; }
       .toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
       .toolbar input { flex: 1; }
       .copy-toast { color: #2a7a2a; margin: 0; }

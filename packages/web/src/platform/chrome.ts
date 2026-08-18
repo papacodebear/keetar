@@ -1,4 +1,5 @@
 // Chrome MV3 shim: service worker with chrome.* APIs (§9.2).
+import { OFFSCREEN_CLEAR_CLIPBOARD_MESSAGE } from '../background/offscreen-protocol';
 
 export const storage = {
     async get<T>(key: string): Promise<T | undefined> {
@@ -68,6 +69,39 @@ export const tabs = {
     }
 };
 
+// Raises an existing window when reusing a tab in it (tabs.update alone only activates within its own window).
+export const windows = {
+    update(windowId: number, updateInfo: chrome.windows.UpdateInfo): Promise<chrome.windows.Window> {
+        return chrome.windows.update(windowId, updateInfo);
+    }
+};
+
+const OFFSCREEN_DOCUMENT_URL = 'offscreen-clipboard.html';
+
+// A service worker has no focused document, so it can't touch navigator.clipboard directly —
+// Chrome's documented workaround is a short-lived offscreen document to do the read/compare/write.
+async function ensureOffscreenDocument(): Promise<void> {
+    const existing = await chrome.runtime.getContexts({
+        contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT]
+    });
+    if (existing.length > 0) {
+        return;
+    }
+    await chrome.offscreen.createDocument({
+        url: OFFSCREEN_DOCUMENT_URL,
+        reasons: [chrome.offscreen.Reason.CLIPBOARD],
+        justification: 'Read the clipboard to confirm it still holds what Keetar copied before auto-clearing it.'
+    });
+}
+
+export const clipboard = {
+    async clearIfMatches(valueHashBase64: string): Promise<void> {
+        await ensureOffscreenDocument();
+        await chrome.runtime.sendMessage({ type: OFFSCREEN_CLEAR_CLIPBOARD_MESSAGE, valueHashBase64 });
+        await chrome.offscreen.closeDocument();
+    }
+};
+
 // Google Drive OAuth via PKCE (shared implementation; getAuthToken Chrome-only; §7.3).
 export const identity = {
     getRedirectURL(path?: string): string {
@@ -85,5 +119,8 @@ export const action = {
     },
     setBadgeBackgroundColor(details: { tabId: number; color: string }): Promise<void> {
         return chrome.action.setBadgeBackgroundColor(details);
+    },
+    setIcon(details: { path: Record<string, string> }): Promise<void> {
+        return chrome.action.setIcon(details);
     }
 };

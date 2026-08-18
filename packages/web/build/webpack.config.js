@@ -101,6 +101,28 @@ export default (env, argv) => {
             mode
         },
         {
+            // Chrome-only offscreen document (§ Options item 7): the only context an MV3 service
+            // worker can delegate navigator.clipboard access to. Harmlessly unused on Firefox.
+            name: 'offscreen-clipboard',
+            entry: path.join(rootDir, 'src/background/offscreen-clipboard.ts'),
+            output: { path: outputPath, filename: 'offscreen-clipboard.js' },
+            target: 'web',
+            resolve: { extensions: ['.tsx', '.ts', '.js'] },
+            module: { rules: [tsRule] },
+            plugins: [
+                new CopyPlugin({
+                    patterns: [
+                        {
+                            from: path.join(rootDir, 'src/background/offscreen-clipboard.html'),
+                            to: 'offscreen-clipboard.html'
+                        }
+                    ]
+                })
+            ],
+            devtool,
+            mode
+        },
+        {
             name: 'content',
             entry: path.join(rootDir, 'src/autofill/content.ts'),
             output: { path: outputPath, filename: 'content.js' },

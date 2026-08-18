@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { sendToBackground, type PendingPasskeyRequest } from '../../background/message-bus';
+import { ErrorBox } from '../shared/ErrorBox';
 import { getConfiguredVault, type VaultBackend } from '../../config/vault-config';
 import { ensureVaultFilePermission } from '../../providers/local-file';
 import type { PromptToRelayMessage } from '../../passkey-provider/bridge-protocol';
@@ -194,7 +195,7 @@ export function App() {
         return <p>Loading…</p>;
     }
     if (view.kind === 'error') {
-        return <p className="error">{view.message}</p>;
+        return <ErrorBox message={view.message} />;
     }
     if (view.kind === 'locked') {
         return (
@@ -209,7 +210,7 @@ export function App() {
     const { request } = view;
     return (
         <div className="panel">
-            <h1>{request.kind === 'create' ? 'Create a passkey' : 'Sign in with a passkey'}</h1>
+            <h1>{request.kind === 'create' ? 'Create a passkey with Keetar' : 'Sign in with a Keetar passkey'}</h1>
             <p className="rp-id">{request.rpId}</p>
             {request.kind === 'create' && view.candidates.length > 0 && (
                 <div className="candidates">
@@ -245,7 +246,7 @@ export function App() {
                     ))}
                 </select>
             )}
-            {view.error && <p className="error">{view.error}</p>}
+            {view.error && <ErrorBox message={view.error} />}
             <div className="actions">
                 <button type="button" disabled={view.busy} onClick={() => postResult(request.origin, { ok: false, error: 'cancelled' })}>
                     Cancel
@@ -278,7 +279,7 @@ function UnlockForm({
         >
             <h1>Unlock {vaultName}</h1>
             <input type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} />
-            {error && <p className="error">{error}</p>}
+            {error && <ErrorBox message={error} />}
             <button type="submit">Unlock</button>
         </form>
     );

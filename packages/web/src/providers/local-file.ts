@@ -75,8 +75,7 @@ async function deleteFileHandle(uuid: string): Promise<void> {
     await withStore('readwrite', (store) => store.delete(uuid));
 }
 
-/** Shows the native file picker and persists the resulting handle — must be called from a document context, not a service worker. */
-export async function pickVaultFile(): Promise<{ uuid: string; name: string }> {
+async function showKdbxOpenPicker(): Promise<FileSystemFileHandle> {
     const [handle] = await window.showOpenFilePicker({
         types: [
             {
@@ -85,9 +84,22 @@ export async function pickVaultFile(): Promise<{ uuid: string; name: string }> {
             }
         ]
     });
+    return handle;
+}
+
+/** Shows the native file picker and persists the resulting handle — must be called from a document context, not a service worker. */
+export async function pickVaultFile(): Promise<{ uuid: string; name: string }> {
+    const handle = await showKdbxOpenPicker();
     const uuid = crypto.randomUUID();
     await storeFileHandle(uuid, handle);
     return { uuid, name: handle.name };
+}
+
+/** Re-links an existing vault's backing file without reissuing its uuid — losing the uuid would orphan biometric enrollment and any other per-vault setting. */
+export async function relinkVaultFile(uuid: string): Promise<{ name: string }> {
+    const handle = await showKdbxOpenPicker();
+    await storeFileHandle(uuid, handle);
+    return { name: handle.name };
 }
 
 /** Same document-context constraint as pickVaultFile(), but for saving a brand-new vault file. */

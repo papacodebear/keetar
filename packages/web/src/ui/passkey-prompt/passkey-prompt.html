@@ -22,7 +22,9 @@
         box-sizing: border-box;
         width: 100%;
       }
-      .error { color: #c00; margin: 0; }
+      .error-box { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.5rem 0.6rem; border: 1px dashed #c00; border-radius: 6px; }
+      .error-box-title { font-size: 0.85em; font-weight: 700; color: #c00; }
+      .error-box-message { margin: 0; font-size: 0.8em; color: #c00; }
       .actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
       button { font-size: 12px; padding: 0.4rem 0.7rem; cursor: pointer; }
     </style>

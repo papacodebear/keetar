@@ -26,6 +26,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # @keetar/web imports @keetar/core via its published dist/ (no lifecycle hook builds it on
+      # install), so nothing downstream — typecheck included — resolves the import without this.
+      - name: Build @keetar/core
+        run: pnpm --filter @keetar/core run build
+
       - name: Typecheck and test
         run: |
           pnpm run typecheck
@@ -44,7 +49,7 @@ jobs:
           done
 
       - name: Build Chrome and Firefox bundles
-        run: pnpm run build
+        run: pnpm --filter @keetar/web run build
 
       - name: Package Chrome build (unpacked zip — Chrome blocks external .crx installs)
         run: |

@@ -1,0 +1,79 @@
+name: Beta build
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # every Monday, 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  beta:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck and test
+        run: |
+          pnpm run typecheck
+          pnpm run test
+
+      # Beta version = the manifests' own version plus this workflow's run number, so every
+      # weekly build is distinct and AMO accepts it as a new upload. Not committed back.
+      - name: Set beta version
+        id: version
+        run: |
+          BASE_VERSION=$(node -p "require('./packages/web/manifests/manifest.chrome.json').version")
+          BETA_VERSION="${BASE_VERSION}.${{ github.run_number }}"
+          echo "version=$BETA_VERSION" >> "$GITHUB_OUTPUT"
+          for f in packages/web/manifests/manifest.chrome.json packages/web/manifests/manifest.firefox.json; do
+            jq --arg v "$BETA_VERSION" '.version = $v' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+          done
+
+      - name: Build Chrome and Firefox bundles
+        run: pnpm run build
+
+      - name: Package Chrome build (unpacked zip — Chrome blocks external .crx installs)
+        run: |
+          mkdir -p artifacts
+          cd packages/web/dist/chrome
+          zip -r "$GITHUB_WORKSPACE/artifacts/keetar-chrome-beta-${{ steps.version.outputs.version }}.zip" .
+
+      - name: Sign Firefox build with AMO
+        working-directory: packages/web
+        run: |
+          npx web-ext sign \
+            --source-dir dist/firefox \
+            --artifacts-dir "$GITHUB_WORKSPACE/artifacts" \
+            --api-key "$WEB_EXT_API_KEY" \
+            --api-secret "$WEB_EXT_API_SECRET" \
+            --channel unlisted
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
+
+      - name: Create beta release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "beta-${{ steps.version.outputs.version }}" \
+            artifacts/*.zip artifacts/*.xpi \
+            --title "Beta ${{ steps.version.outputs.version }}" \
+            --notes "Automated weekly beta build.
+
+          **Chrome**: unzip \`keetar-chrome-beta-*.zip\`, then \`chrome://extensions\` → enable Developer mode → Load unpacked.
+          **Firefox**: download the \`.xpi\` and drag it into Firefox, or open it directly — it's signed for self-distribution and installs without a warning." \
+            --prerelease

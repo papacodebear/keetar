@@ -8,6 +8,7 @@ import { PianoKeysWatermark } from '../shared/PianoKeysWatermark';
 import { ErrorBox } from '../shared/ErrorBox';
 import { buildAiSortExport, diffAiSortAssignments, parseAiSortResponse } from './ai-sort';
 import { CustomFieldsSection } from './CustomFieldsSection';
+import { PasskeySection } from './PasskeySection';
 import { getSortedEntryUuids, markEntriesSorted } from './ai-sort-tracker';
 import { connectGoogleDrive, getAccessToken, GoogleDriveProvider } from '../../providers/gdrive';
 import { showDrivePicker } from '../../providers/gdrive-picker';
@@ -1456,6 +1457,8 @@ function EntryDetailPanel({
         if (response.ok && response.type === 'GET_ENTRY_DETAIL') {
             setEntry(response.entry);
             setUrlValue(response.entry.url);
+        } else if (!response.ok) {
+            console.error('GET_ENTRY_DETAIL failed:', response.error);
         }
     }
 
@@ -1557,11 +1560,23 @@ function EntryDetailPanel({
     return (
         <div>
             <div className="entry-detail-header">
-                <EntryIcon entryUuid={entry.uuid} icon={entry.icon} hasCustomIcon={entry.hasCustomIcon} size={28} />
-                <button type="button" disabled={!entry.url || fetchingFavicon} onClick={() => void useFavicon()}>
-                    {fetchingFavicon ? 'Fetching…' : 'Use site favicon'}
-                </button>
-                {faviconError && <span className="entry-row-username">{faviconError}</span>}
+                <div className="entry-detail-header-left">
+                    <EntryIcon entryUuid={entry.uuid} icon={entry.icon} hasCustomIcon={entry.hasCustomIcon} size={28} />
+                    <button type="button" disabled={!entry.url || fetchingFavicon} onClick={() => void useFavicon()}>
+                        {fetchingFavicon ? 'Fetching…' : 'Use site favicon'}
+                    </button>
+                    {faviconError && <span className="entry-row-username">{faviconError}</span>}
+                </div>
+                <div className="entry-detail-group">
+                    <label>Group</label>
+                    <select value={entry.groupUuid} onChange={(e) => void moveTo(e.target.value)}>
+                        {sortByName(flattenGroups(root), (g) => g.name).map((g) => (
+                            <option key={g.uuid} value={g.uuid}>
+                                {g.name || '(unnamed)'}
+                            </option>
+                        ))}
+                    </select>
+                </div>
             </div>
             <div className="field">
                 <label>Title</label>
@@ -1631,18 +1646,10 @@ function EntryDetailPanel({
                 <label>Notes</label>
                 <textarea defaultValue={entry.notes} onBlur={(e) => void saveField('notes', e.target.value)} />
             </div>
-            <div className="field">
-                <label>Group</label>
-                <select value={entry.groupUuid} onChange={(e) => void moveTo(e.target.value)}>
-                    {sortByName(flattenGroups(root), (g) => g.name).map((g) => (
-                        <option key={g.uuid} value={g.uuid}>
-                            {g.name || '(unnamed)'}
-                        </option>
-                    ))}
-                </select>
-            </div>
 
-            <div className="attachments">
+            <CustomFieldsSection entryUuid={entry.uuid} customFields={entry.customFields} onChanged={() => void load()} />
+
+            <div className="detail-section">
                 <label>Attachments</label>
                 {entry.attachments.map((a) => (
                     <div className="attachment-row" key={a.name}>
@@ -1671,7 +1678,7 @@ function EntryDetailPanel({
                 />
             </div>
 
-            <CustomFieldsSection entryUuid={entry.uuid} customFields={entry.customFields} onChanged={() => void load()} />
+            <PasskeySection entryUuid={entry.uuid} onChanged={() => void load()} />
 
             <p style={{ marginTop: '1rem' }}>
                 {savedFlash && <span className="save-indicator">Saved</span>}

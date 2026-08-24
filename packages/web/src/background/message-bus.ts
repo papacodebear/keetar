@@ -8,6 +8,7 @@ import type {
     DuplicateCredentialGroup,
     GroupNode,
     GroupSummary,
+    PasskeySummary,
     PasswordHealthReport,
     VaultSummary
 } from './vault-session';
@@ -78,6 +79,8 @@ export type KeetarRequest =
     | { type: 'GET_GROUP_TREE' }
     | { type: 'APPLY_AI_SORT'; assignments: { entryUuid: string; groupName: string }[] }
     | { type: 'GET_ENTRY_DETAIL'; entryUuid: string }
+    | { type: 'LIST_PASSKEYS_FOR_ENTRY'; entryUuid: string }
+    | { type: 'REMOVE_PASSKEY'; entryUuid: string; credentialId: string }
     | { type: 'MOVE_ENTRY'; entryUuid: string; toGroupUuid: string }
     | { type: 'CREATE_GROUP'; parentGroupUuid: string; name: string }
     | { type: 'RENAME_GROUP'; groupUuid: string; name: string }
@@ -156,6 +159,8 @@ export type KeetarResponse =
     | { ok: true; type: 'GET_GROUP_TREE'; root: GroupNode; recycleBinGroupUuid: string | undefined }
     | { ok: true; type: 'APPLY_AI_SORT'; groupsCreated: number; entriesMoved: number; skipped: number }
     | { ok: true; type: 'GET_ENTRY_DETAIL'; entry: EntryDetail }
+    | { ok: true; type: 'LIST_PASSKEYS_FOR_ENTRY'; passkeys: PasskeySummary[] }
+    | { ok: true; type: 'REMOVE_PASSKEY' }
     | { ok: true; type: 'MOVE_ENTRY' }
     | { ok: true; type: 'CREATE_GROUP'; group: GroupSummary }
     | { ok: true; type: 'RENAME_GROUP' }

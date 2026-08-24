@@ -5,12 +5,16 @@ import {
     createHibpClient,
     exportToCsv,
     exportToXml,
+    isReservedFieldName,
     Kdbx,
     KdbxCredentials,
     KdbxBinaries,
     KdbxUuid,
+    KeepassxcPasskeyStorage,
+    NativePasskeyStorage,
     ProtectedValue,
-    Totp
+    Totp,
+    WebauthnCrypto
 } from '@keetar/core';
 import type {
     FileProvider,
@@ -20,6 +24,7 @@ import type {
     KdbxEntryField,
     KdbxGroup,
     KdbxMemoryProtection,
+    PasskeyRecord,
     PasswordHealthReport,
     VaultEntryRecord
 } from '@keetar/core';
@@ -27,34 +32,9 @@ import { getConfiguredVault } from '../config/vault-config';
 import { createFileProvider } from '../providers';
 import { fetchFaviconPng } from './favicon';
 import type { CapturedLogin } from './login-capture';
-import { isReservedFieldName } from './reserved-fields';
 import { buildFieldReference, parseFieldReference } from './field-reference';
 import { applyCloneAwareness, type CloneAwareEntry } from './clone-aware-health';
-import {
-    isRpIdValidForOrigin,
-    matchEntriesForRpId,
-    passkeyAttachmentName,
-    decodePasskeyRecord,
-    encodePasskeyRecord,
-    parsePasskeyIndex,
-    serializePasskeyIndex,
-    PASSKEY_INDEX_FIELD
-} from './passkey-store';
-import {
-    base64UrlDecode,
-    base64UrlEncode,
-    buildAttestationObject,
-    buildAttestedCredentialData,
-    buildAuthenticatorData,
-    buildClientDataJson,
-    concatBytes,
-    exportCosePublicKey,
-    exportPkcs8,
-    generateP256KeyPair,
-    importPkcs8PrivateKey,
-    sha256,
-    signWithDer
-} from '../passkey-provider/webauthn-crypto';
+import { isRpIdValidForOrigin, matchEntriesForRpId } from './passkey-web';
 import {
     findExactDuplicateGroups,
     findExactDuplicateMatches,
@@ -109,6 +89,12 @@ export interface EntryCustomField {
     protected: boolean;
 }
 
+/** A passkey on an entry, regardless of which storage backend (native attachment or KeePassXC fields) holds it. */
+export interface PasskeySummary {
+    credentialId: string; // base64url
+    rpId: string;
+}
+
 export interface EntryDetail {
     uuid: string;
     groupUuid: string;
@@ -119,6 +105,7 @@ export interface EntryDetail {
     notes: string;
     attachments: AttachmentSummary[];
     customFields: EntryCustomField[];
+    passkeys: PasskeySummary[];
     /** Set when Username/Password are live KeePass field references to another entry (a "clone"). */
     clonedFromEntryUuid: string | undefined;
     icon: number;
@@ -379,6 +366,7 @@ class VaultSession {
                 size: resolveBinary(value).byteLength
             })),
             customFields: customFieldsOf(entry),
+            passkeys: this.passkeysOnEntry(entry),
             icon: entry.icon ?? Consts.Icons.Key,
             hasCustomIcon: entry.customIcon !== undefined
         };
@@ -449,6 +437,7 @@ class VaultSession {
     }
 
     // WebAuthn create(): keypair never leaves this method; only public bytes go back to the caller.
+    // Always native + ES256 — writing new KeePassXC-format passkeys is out of scope.
     async createPasskey(params: {
         rpId: string;
         origin: string;
@@ -468,32 +457,38 @@ class VaultSession {
             entry.pushHistory();
         }
 
-        const keyPair = await generateP256KeyPair();
+        const keyPair = await WebauthnCrypto.generateP256KeyPair();
         const credentialId = crypto.getRandomValues(new Uint8Array(32));
         const [privateKeyPkcs8, cosePublicKey] = await Promise.all([
-            exportPkcs8(keyPair.privateKey),
-            exportCosePublicKey(keyPair.publicKey)
+            WebauthnCrypto.exportPkcs8(keyPair.privateKey),
+            WebauthnCrypto.exportCosePublicKey(keyPair.publicKey)
         ]);
 
-        const record = encodePasskeyRecord({
+        const record: PasskeyRecord = {
             credentialId,
             privateKeyPkcs8,
-            userHandle: base64UrlDecode(params.userHandleBase64Url),
-            algorithm: -7,
+            userHandle: WebauthnCrypto.base64UrlDecode(params.userHandleBase64Url),
+            algorithm: 'ES256',
             rpId: params.rpId,
+            username: params.userName,
             signCount: 0
-        });
-        entry.binaries.set(passkeyAttachmentName(credentialId), await db.createBinary(ProtectedValue.fromBinary(record)));
+        };
+        entry.binaries.set(
+            NativePasskeyStorage.passkeyAttachmentName(credentialId),
+            await db.createBinary(ProtectedValue.fromBinary(NativePasskeyStorage.encodeNativeRecord(record)))
+        );
 
-        const index = parsePasskeyIndex(fieldText(entry.fields.get(PASSKEY_INDEX_FIELD)));
-        index.push({ credentialId: base64UrlEncode(credentialId), rpId: params.rpId });
-        entry.fields.set(PASSKEY_INDEX_FIELD, serializePasskeyIndex(index));
+        const index = NativePasskeyStorage.parsePasskeyIndex(
+            fieldText(entry.fields.get(NativePasskeyStorage.PASSKEY_INDEX_FIELD))
+        );
+        index.push({ credentialId: WebauthnCrypto.base64UrlEncode(credentialId), rpId: params.rpId });
+        entry.fields.set(NativePasskeyStorage.PASSKEY_INDEX_FIELD, NativePasskeyStorage.serializePasskeyIndex(index));
 
         entry.times.update();
         await this.persist();
 
-        const attestedCredentialData = buildAttestedCredentialData(credentialId, cosePublicKey);
-        const authenticatorData = await buildAuthenticatorData({
+        const attestedCredentialData = WebauthnCrypto.buildAttestedCredentialData(credentialId, cosePublicKey);
+        const authenticatorData = await WebauthnCrypto.buildAuthenticatorData({
             rpId: params.rpId,
             signCount: 0,
             attestedCredentialData
@@ -501,13 +496,14 @@ class VaultSession {
 
         return {
             entryUuid: entry.uuid.id,
-            credentialId: base64UrlEncode(credentialId),
+            credentialId: WebauthnCrypto.base64UrlEncode(credentialId),
             publicKeyCoseBase64: ByteUtils.bytesToBase64(cosePublicKey),
-            attestationObjectBase64: ByteUtils.bytesToBase64(buildAttestationObject(authenticatorData))
+            attestationObjectBase64: ByteUtils.bytesToBase64(WebauthnCrypto.buildAttestationObject(authenticatorData))
         };
     }
 
     // WebAuthn get(): re-validates rpId itself rather than trusting the caller (§ Security).
+    // Tries the native backend first, then the KeePassXC one — both are fully read/write, sign count included.
     async signPasskeyAssertion(params: {
         entryUuid: string;
         credentialId: string;
@@ -520,45 +516,61 @@ class VaultSession {
         }
         const db = this.requireUnlocked();
         const entry = this.requireEntry(params.entryUuid);
-        const credentialIdBytes = base64UrlDecode(params.credentialId);
-        const attachmentName = passkeyAttachmentName(credentialIdBytes);
-        const binary = entry.binaries.get(attachmentName);
-        if (!binary) {
+        const credentialIdBytes = WebauthnCrypto.base64UrlDecode(params.credentialId);
+        const attachmentName = NativePasskeyStorage.passkeyAttachmentName(credentialIdBytes);
+        const nativeBinary = entry.binaries.get(attachmentName);
+
+        const record = nativeBinary
+            ? NativePasskeyStorage.decodeNativeRecord(new Uint8Array(resolveBinary(nativeBinary)))
+            : KeepassxcPasskeyStorage.readKeepassxcRecord(entryFieldsAsText(entry));
+        if (!record) {
             throw new Error('passkey not found on entry');
         }
-        const record = decodePasskeyRecord(new Uint8Array(resolveBinary(binary)));
         if (record.rpId !== params.rpId) {
             throw new Error('passkey does not belong to this site');
         }
+        if (!nativeBinary && WebauthnCrypto.base64UrlEncode(record.credentialId) !== params.credentialId) {
+            throw new Error('passkey not found on entry');
+        }
 
-        const privateKey = await importPkcs8PrivateKey(record.privateKeyPkcs8);
+        const privateKey = await WebauthnCrypto.importAnyPrivateKey(record.privateKeyPkcs8, record.algorithm);
         const nextSignCount = record.signCount + 1;
-        const authenticatorData = await buildAuthenticatorData({ rpId: params.rpId, signCount: nextSignCount });
-        const clientDataJson = buildClientDataJson({
+        const authenticatorData = await WebauthnCrypto.buildAuthenticatorData({ rpId: params.rpId, signCount: nextSignCount });
+        const clientDataJson = WebauthnCrypto.buildClientDataJson({
             type: 'webauthn.get',
             challenge: ByteUtils.base64ToBytes(params.challengeBase64),
             origin: params.origin
         });
-        const clientDataHash = await sha256(clientDataJson);
-        const signature = await signWithDer(privateKey, concatBytes([authenticatorData, clientDataHash]));
-
-        entry.binaries.set(
-            attachmentName,
-            await db.createBinary(
-                ProtectedValue.fromBinary(encodePasskeyRecord({ ...record, signCount: nextSignCount }))
-            )
+        const clientDataHash = await WebauthnCrypto.sha256(clientDataJson);
+        const signature = await WebauthnCrypto.signAssertion(
+            privateKey,
+            record.algorithm,
+            WebauthnCrypto.concatBytes([authenticatorData, clientDataHash])
         );
+
+        const updatedRecord: PasskeyRecord = { ...record, signCount: nextSignCount };
+        if (nativeBinary) {
+            entry.binaries.set(
+                attachmentName,
+                await db.createBinary(ProtectedValue.fromBinary(NativePasskeyStorage.encodeNativeRecord(updatedRecord)))
+            );
+        } else {
+            for (const field of KeepassxcPasskeyStorage.writeKeepassxcRecord(updatedRecord)) {
+                entry.fields.set(field.name, field.protect ? ProtectedValue.fromString(field.value) : field.value);
+            }
+        }
         entry.times.update();
         await this.persist();
 
         return {
             signatureBase64: ByteUtils.bytesToBase64(signature),
             authenticatorDataBase64: ByteUtils.bytesToBase64(authenticatorData),
-            userHandleBase64Url: base64UrlEncode(record.userHandle),
+            userHandleBase64Url: WebauthnCrypto.base64UrlEncode(record.userHandle),
             signCount: nextSignCount
         };
     }
 
+    // rpId-keyed, for WebAuthn interception — distinct from listPasskeysForEntry, which is entryUuid-keyed for the UI.
     listPasskeysForRpId(
         rpId: string,
         allowCredentialIds?: string[]
@@ -567,28 +579,77 @@ class VaultSession {
         const recycleBinUuid = db.meta.recycleBinUuid;
         const allowSet = allowCredentialIds ? new Set(allowCredentialIds) : undefined;
         const results: { entryUuid: string; entryTitle: string; credentialId: string }[] = [];
-        const walk = (group: KdbxGroup) => {
-            if (recycleBinUuid && group.uuid.equals(recycleBinUuid)) {
-                return;
+        for (const entry of db.getDefaultGroup().allEntries()) {
+            if (recycleBinUuid && isInGroup(entry, recycleBinUuid)) {
+                continue;
             }
-            for (const entry of group.entries) {
-                for (const item of parsePasskeyIndex(fieldText(entry.fields.get(PASSKEY_INDEX_FIELD)))) {
-                    if (item.rpId !== rpId || (allowSet && !allowSet.has(item.credentialId))) {
-                        continue;
-                    }
-                    results.push({
-                        entryUuid: entry.uuid.id,
-                        entryTitle: fieldText(entry.fields.get('Title')),
-                        credentialId: item.credentialId
-                    });
+            const entryTitle = fieldText(entry.fields.get('Title'));
+            for (const item of NativePasskeyStorage.parsePasskeyIndex(
+                fieldText(entry.fields.get(NativePasskeyStorage.PASSKEY_INDEX_FIELD))
+            )) {
+                if (item.rpId !== rpId || (allowSet && !allowSet.has(item.credentialId))) {
+                    continue;
+                }
+                results.push({ entryUuid: entry.uuid.id, entryTitle, credentialId: item.credentialId });
+            }
+            const keepassxcRecord = KeepassxcPasskeyStorage.readKeepassxcRecord(entryFieldsAsText(entry));
+            if (keepassxcRecord && keepassxcRecord.rpId === rpId) {
+                const credentialId = WebauthnCrypto.base64UrlEncode(keepassxcRecord.credentialId);
+                if (!allowSet || allowSet.has(credentialId)) {
+                    results.push({ entryUuid: entry.uuid.id, entryTitle, credentialId });
                 }
             }
-            for (const subGroup of group.groups) {
-                walk(subGroup);
-            }
-        };
-        walk(db.getDefaultGroup());
+        }
         return results;
+    }
+
+    // entryUuid-keyed, for the entry-detail UI. Merges both backends into one list — the UI never
+    // branches on where a passkey came from.
+    listPasskeysForEntry(entryUuid: string): PasskeySummary[] {
+        return this.passkeysOnEntry(this.requireEntry(entryUuid));
+    }
+
+    private passkeysOnEntry(entry: KdbxEntry): PasskeySummary[] {
+        const results: PasskeySummary[] = [];
+        for (const item of NativePasskeyStorage.parsePasskeyIndex(
+            fieldText(entry.fields.get(NativePasskeyStorage.PASSKEY_INDEX_FIELD))
+        )) {
+            results.push({ credentialId: item.credentialId, rpId: item.rpId });
+        }
+        const keepassxcRecord = KeepassxcPasskeyStorage.readKeepassxcRecord(entryFieldsAsText(entry));
+        if (keepassxcRecord) {
+            results.push({ credentialId: WebauthnCrypto.base64UrlEncode(keepassxcRecord.credentialId), rpId: keepassxcRecord.rpId });
+        }
+        return results;
+    }
+
+    // Tries the native backend first (attachment + index entry), then the KeePassXC one (its fields) —
+    // one unified action regardless of which backend actually holds the credential.
+    async removePasskey(entryUuid: string, credentialId: string): Promise<void> {
+        const entry = this.requireEntry(entryUuid);
+        const attachmentName = NativePasskeyStorage.passkeyAttachmentName(WebauthnCrypto.base64UrlDecode(credentialId));
+        if (entry.binaries.has(attachmentName)) {
+            entry.pushHistory();
+            entry.binaries.delete(attachmentName);
+            const index = NativePasskeyStorage.parsePasskeyIndex(
+                fieldText(entry.fields.get(NativePasskeyStorage.PASSKEY_INDEX_FIELD))
+            ).filter((item) => item.credentialId !== credentialId);
+            entry.fields.set(NativePasskeyStorage.PASSKEY_INDEX_FIELD, NativePasskeyStorage.serializePasskeyIndex(index));
+            entry.times.update();
+            await this.persist();
+            return;
+        }
+        const keepassxcRecord = KeepassxcPasskeyStorage.readKeepassxcRecord(entryFieldsAsText(entry));
+        if (keepassxcRecord && WebauthnCrypto.base64UrlEncode(keepassxcRecord.credentialId) === credentialId) {
+            entry.pushHistory();
+            for (const name of KeepassxcPasskeyStorage.KEEPASSXC_PASSKEY_FIELD_NAMES) {
+                entry.fields.delete(name);
+            }
+            entry.times.update();
+            await this.persist();
+            return;
+        }
+        throw new Error('passkey not found on entry');
     }
 
     private resolvePasskeyEntry(
@@ -1063,6 +1124,14 @@ function fieldText(field: KdbxEntryField | undefined): string {
         return '';
     }
     return typeof field === 'string' ? field : field.getText();
+}
+
+function entryFieldsAsText(entry: KdbxEntry): Map<string, string> {
+    const result = new Map<string, string>();
+    for (const [name, value] of entry.fields) {
+        result.set(name, fieldText(value));
+    }
+    return result;
 }
 
 function uuidHexOf(entry: KdbxEntry): string {

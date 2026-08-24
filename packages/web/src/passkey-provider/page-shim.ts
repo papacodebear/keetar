@@ -1,5 +1,4 @@
-import { ByteUtils } from '@keetar/core';
-import { base64UrlDecode, base64UrlEncode, buildClientDataJson } from './webauthn-crypto';
+import { ByteUtils, WebauthnCrypto } from '@keetar/core';
 import {
     PAGE_TO_RELAY_SOURCE,
     RELAY_ENABLE_SOURCE,
@@ -9,6 +8,8 @@ import {
     type RelayToPageMessage
 } from './bridge-protocol';
 
+const { base64UrlDecode, base64UrlEncode, buildClientDataJson } = WebauthnCrypto;
+
 let interceptionEnabled = false;
 window.addEventListener('message', (event) => {
     const data = event.data as RelayEnableMessage | undefined;
@@ -17,9 +18,8 @@ window.addEventListener('message', (event) => {
     }
 });
 
-// MAIN-world monkey-patch of navigator.credentials — no extension API exists to register as a
-// WebAuthn picker option, so this is the only interception point (§ Context). No crypto here;
-// only captures the real call and relays it to the isolated-world content script.
+// MAIN-world monkey-patch of navigator.credentials — the only interception point available (§ Context).
+// No crypto here; only captures the real call and relays it to the isolated-world content script.
 
 const ES256_ALG = -7;
 

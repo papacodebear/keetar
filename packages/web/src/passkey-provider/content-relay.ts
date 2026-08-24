@@ -1,7 +1,6 @@
-import { ByteUtils } from '@keetar/core';
+import { ByteUtils, WebauthnCrypto } from '@keetar/core';
 import { sendToBackground, type PendingPasskeyRequest } from '../background/message-bus';
 import { isPasskeyInterceptionEnabled } from '../config/passkey-config';
-import { base64UrlDecode } from './webauthn-crypto';
 import {
     PAGE_TO_RELAY_SOURCE,
     RELAY_ENABLE_SOURCE,
@@ -10,6 +9,8 @@ import {
     type PromptToRelayMessage,
     type RelayToPageMessage
 } from './bridge-protocol';
+
+const { base64UrlDecode } = WebauthnCrypto;
 
 // Isolated-world bridge: relays the MAIN-world shim's captured request to the background
 // (§ Architecture step 2), shows the passkey-prompt iframe, and relays its result back.

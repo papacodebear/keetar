@@ -56,6 +56,15 @@ export function bytesToBase64(arr: ArrayBufferOrArray): string {
     }
 }
 
+export function bytesToBase64Url(arr: ArrayBufferOrArray): string {
+    return bytesToBase64(arr).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+export function base64UrlToBytes(str: string): Uint8Array<ArrayBuffer> {
+    const padded = str.replace(/-/g, '+').replace(/_/g, '/');
+    return base64ToBytes(padded.padEnd(padded.length + ((4 - (padded.length % 4)) % 4), '='));
+}
+
 export function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
     const arr = new Uint8Array(Math.ceil(hex.length / 2));
     for (let i = 0; i < arr.length; i++) {

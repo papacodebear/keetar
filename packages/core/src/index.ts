@@ -24,8 +24,13 @@ import { KdbxHeader } from './kdbx/kdbx-header.js';
 import { KdbxMeta } from './kdbx/kdbx-meta.js';
 import { KdbxTimes } from './kdbx/kdbx-times.js';
 import { KdbxUuid } from './kdbx/kdbx-uuid.js';
+import { isReservedFieldName } from './kdbx/reserved-fields.js';
 
 import * as Totp from './totp/totp.js';
+
+import * as WebauthnCrypto from './passkey/webauthn-crypto.js';
+import * as NativePasskeyStorage from './passkey/native-storage.js';
+import * as KeepassxcPasskeyStorage from './passkey/keepassxc-storage.js';
 
 import { parseBitwardenJson } from './import/bitwarden.js';
 import { exportToCsv, exportToXml } from './import/export.js';
@@ -64,7 +69,11 @@ export {
     KdbxMeta,
     KdbxTimes,
     KdbxUuid,
+    isReservedFieldName,
     Totp,
+    WebauthnCrypto,
+    NativePasskeyStorage,
+    KeepassxcPasskeyStorage,
     parseBitwardenJson,
     parseCsv,
     parseOnePux,
@@ -106,6 +115,10 @@ export type {
 } from './health/analyser.js';
 export type { HibpClient, HibpFetch } from './health/hibp.js';
 export type { TotpAlgorithm, TotpCode, TotpConfig } from './totp/totp.js';
+export type { PasskeyAlgorithm } from './passkey/webauthn-crypto.js';
+export type { PasskeyRecord } from './passkey/record.js';
+export type { PasskeyIndexEntry } from './passkey/native-storage.js';
+export type { KeepassxcFieldWrite } from './passkey/keepassxc-storage.js';
 export type { KdbxCustomDataMap, KdbxCustomDataItem } from './kdbx/kdbx-custom-data.js';
 export type {
     KdbxAutoTypeItem,

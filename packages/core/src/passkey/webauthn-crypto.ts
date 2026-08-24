@@ -1,7 +1,9 @@
-import { ByteUtils } from '@keetar/core';
-import { encodeCborMap, type CborMap } from './cbor';
+import * as ByteUtils from '../utils/byte-utils.js';
+import { encodeCborMap, type CborMap } from './cbor.js';
 
-// ES256 (P-256) only, attestation format "none" — the WebAuthn subset this plan covers.
+// Keetar itself only ever generates ES256; RS256/EdDSA support is for signing with existing keys.
+
+export type PasskeyAlgorithm = 'ES256' | 'RS256' | 'EdDSA';
 
 const FLAG_USER_PRESENT = 0x01;
 const FLAG_USER_VERIFIED = 0x04;
@@ -9,12 +11,11 @@ const FLAG_ATTESTED_CREDENTIAL_DATA = 0x40;
 const ZERO_AAGUID = new Uint8Array(16);
 
 export function base64UrlEncode(bytes: Uint8Array): string {
-    return ByteUtils.bytesToBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return ByteUtils.bytesToBase64Url(bytes);
 }
 
 export function base64UrlDecode(value: string): Uint8Array {
-    const padded = value.replace(/-/g, '+').replace(/_/g, '/');
-    return ByteUtils.base64ToBytes(padded.padEnd(padded.length + ((4 - (padded.length % 4)) % 4), '='));
+    return ByteUtils.base64UrlToBytes(value);
 }
 
 // WebCrypto's BufferSource wants a real ArrayBuffer, not the wider ArrayBufferLike a Uint8Array carries.
@@ -140,4 +141,110 @@ export async function signWithDer(privateKey: CryptoKey, data: Uint8Array): Prom
 
 export async function sha256(data: Uint8Array): Promise<Uint8Array> {
     return new Uint8Array(await crypto.subtle.digest('SHA-256', toArrayBuffer(data)));
+}
+
+// --- Multi-algorithm support, for signing with keys Keetar didn't generate itself. ---
+
+export function pemToPkcs8(pem: string): Uint8Array {
+    const base64 = pem.replace(/-----BEGIN [^-]+-----/g, '').replace(/-----END [^-]+-----/g, '').replace(/\s+/g, '');
+    return ByteUtils.base64ToBytes(base64);
+}
+
+export function pkcs8ToPem(bytes: Uint8Array): string {
+    const base64 = ByteUtils.bytesToBase64(bytes);
+    const lines: string[] = [];
+    for (let i = 0; i < base64.length; i += 64) {
+        lines.push(base64.slice(i, i + 64));
+    }
+    return `-----BEGIN PRIVATE KEY-----\n${lines.join('\n')}\n-----END PRIVATE KEY-----`;
+}
+
+function readDerLength(bytes: Uint8Array, pos: number): { length: number; next: number } {
+    const first = bytes[pos];
+    if ((first & 0x80) === 0) {
+        return { length: first, next: pos + 1 };
+    }
+    const numBytes = first & 0x7f;
+    let length = 0;
+    for (let i = 0; i < numBytes; i++) {
+        length = (length << 8) | bytes[pos + 1 + i];
+    }
+    return { length, next: pos + 1 + numBytes };
+}
+
+function readDerTlv(bytes: Uint8Array, pos: number): { tag: number; value: Uint8Array; next: number } {
+    const tag = bytes[pos];
+    const { length, next } = readDerLength(bytes, pos + 1);
+    return { tag, value: bytes.slice(next, next + length), next: next + length };
+}
+
+function decodeOid(bytes: Uint8Array): string {
+    const parts: number[] = [Math.floor(bytes[0] / 40), bytes[0] % 40];
+    let value = 0;
+    for (let i = 1; i < bytes.length; i++) {
+        value = (value << 7) | (bytes[i] & 0x7f);
+        if ((bytes[i] & 0x80) === 0) {
+            parts.push(value);
+            value = 0;
+        }
+    }
+    return parts.join('.');
+}
+
+const OID_RSA_ENCRYPTION = '1.2.840.113549.1.1.1';
+const OID_EC_PUBLIC_KEY = '1.2.840.10045.2.1';
+const OID_ED25519 = '1.3.101.112';
+
+// PKCS8 stores no algorithm field callers can just read — this sniffs PrivateKeyInfo's
+// AlgorithmIdentifier OID instead, needed for keys Keetar didn't generate (no COSE alg to consult).
+export function detectPkcs8Algorithm(pkcs8: Uint8Array): PasskeyAlgorithm {
+    const outer = readDerTlv(pkcs8, 0);
+    if (outer.tag !== 0x30) {
+        throw new Error('not a valid PKCS8 private key: expected SEQUENCE');
+    }
+    const version = readDerTlv(outer.value, 0);
+    const algIdSeq = readDerTlv(outer.value, version.next);
+    if (algIdSeq.tag !== 0x30) {
+        throw new Error('not a valid PKCS8 private key: expected AlgorithmIdentifier SEQUENCE');
+    }
+    const oidTlv = readDerTlv(algIdSeq.value, 0);
+    if (oidTlv.tag !== 0x06) {
+        throw new Error('not a valid PKCS8 private key: expected algorithm OID');
+    }
+    const oid = decodeOid(oidTlv.value);
+    switch (oid) {
+        case OID_RSA_ENCRYPTION:
+            return 'RS256';
+        case OID_EC_PUBLIC_KEY:
+            return 'ES256';
+        case OID_ED25519:
+            return 'EdDSA';
+        default:
+            throw new Error(`unsupported PKCS8 key algorithm OID: ${oid}`);
+    }
+}
+
+function algorithmImportParams(algorithm: PasskeyAlgorithm): EcKeyImportParams | RsaHashedImportParams | Algorithm {
+    switch (algorithm) {
+        case 'ES256':
+            return { name: 'ECDSA', namedCurve: 'P-256' };
+        case 'RS256':
+            return { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' };
+        case 'EdDSA':
+            return { name: 'Ed25519' };
+    }
+}
+
+export async function importAnyPrivateKey(pkcs8: Uint8Array, algorithm: PasskeyAlgorithm): Promise<CryptoKey> {
+    return crypto.subtle.importKey('pkcs8', toArrayBuffer(pkcs8), algorithmImportParams(algorithm), false, ['sign']);
+}
+
+// ES256 signatures need the raw-to-DER conversion signWithDer already does; RS256/EdDSA
+// signatures from WebCrypto are already in their final WebAuthn-ready form.
+export async function signAssertion(privateKey: CryptoKey, algorithm: PasskeyAlgorithm, data: Uint8Array): Promise<Uint8Array> {
+    if (algorithm === 'ES256') {
+        return signWithDer(privateKey, data);
+    }
+    const signParams = algorithm === 'RS256' ? { name: 'RSASSA-PKCS1-v1_5' } : { name: 'Ed25519' };
+    return new Uint8Array(await crypto.subtle.sign(signParams, privateKey, toArrayBuffer(data)));
 }

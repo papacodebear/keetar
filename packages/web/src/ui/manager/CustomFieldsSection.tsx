@@ -65,7 +65,7 @@ export function CustomFieldsSection({
     }
 
     return (
-        <div className="custom-fields">
+        <div className="detail-section">
             <label>Custom Fields</label>
             {error && <p className="entry-row-username">{error}</p>}
             {customFields.map((field) => (

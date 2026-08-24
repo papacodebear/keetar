@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { isRpIdValidForOrigin } from '../../src/background/passkey-store';
+import { isRpIdValidForOrigin } from '../../src/background/passkey-web';
 
 // Regression coverage for the boundary that stops one site from creating/asserting a passkey
 // scoped to another site's rpId (§ Options item 10 — cross-site entry isolation).

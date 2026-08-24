@@ -344,6 +344,15 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
                 type: 'GET_ENTRY_DETAIL',
                 entry: vaultSession.getEntryDetail(request.entryUuid)
             };
+        case 'LIST_PASSKEYS_FOR_ENTRY':
+            return {
+                ok: true,
+                type: 'LIST_PASSKEYS_FOR_ENTRY',
+                passkeys: vaultSession.listPasskeysForEntry(request.entryUuid)
+            };
+        case 'REMOVE_PASSKEY':
+            await vaultSession.removePasskey(request.entryUuid, request.credentialId);
+            return { ok: true, type: 'REMOVE_PASSKEY' };
         case 'MOVE_ENTRY':
             await vaultSession.moveEntry(request.entryUuid, request.toGroupUuid);
             return { ok: true, type: 'MOVE_ENTRY' };

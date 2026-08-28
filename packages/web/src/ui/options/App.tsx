@@ -10,14 +10,20 @@ import {
     type ConfiguredVault,
     type VaultBackend
 } from '../../config/vault-config';
-import { enroll, isBiometricEnrolled, removeEnrollment, unlockToPasswordHash } from '../../auth/biometric';
+import {
+    enroll,
+    isBiometricEnrolled,
+    prefetchForBiometricEnroll,
+    removeEnrollment,
+    unlockToPasswordHash
+} from '../../auth/biometric';
 import { isWebAuthnSupported } from '../../auth/webauthn';
-import { connectGoogleDrive, getAccessToken, GoogleDriveProvider, isGoogleDriveConnected } from '../../providers/gdrive';
+import { ensureGoogleDriveAuthorized, GoogleDriveProvider, isGoogleDriveConnected } from '../../providers/gdrive';
 import { showDrivePicker } from '../../providers/gdrive-picker';
 import { checkVaultSyncStatus, resolveVaultSyncConflict } from '../../providers';
 import type { SyncStatus } from '../../providers/opfs-cache';
 import { createEmptyVaultBytes } from '../../providers/vault-creation';
-import { sendToBackground } from '../../background/message-bus';
+import { onVaultLocked, sendToBackground } from '../../background/message-bus';
 import { VaultProviderIcon } from '../shared/VaultProviderIcon';
 import { GeneratorOptionsForm, type GeneratorMode } from '../shared/GeneratorOptionsForm';
 import { getGeneratorPreferences, setGeneratorPreferences } from '../../config/generator-config';
@@ -25,6 +31,7 @@ import type { GeneratorPreferences } from '../../config/generator-config';
 import { isPasskeyInterceptionEnabled, setPasskeyInterceptionEnabled } from '../../config/passkey-config';
 import { getAutoLockTimeoutSeconds, MIN_AUTO_LOCK_TIMEOUT_SECONDS } from '../../config/security-config';
 import { getClipboardClearSeconds, setClipboardClearSeconds } from '../../config/clipboard-config';
+import { getRevealTimeoutSeconds, setRevealTimeoutSeconds } from '../../config/reveal-config';
 import { listTrustedHosts, revokeHost, type TrustedHost } from '../../config/trusted-hosts';
 
 // Setup & config without vault unlock; owns backend setup and biometric enrollment (§8.1–8.2).
@@ -36,18 +43,9 @@ const SECTIONS = [
     { id: 'biometric', label: 'Biometric unlock' },
     { id: 'passkeys', label: 'Passkeys' },
     { id: 'security', label: 'Security' },
-    { id: 'trusted-sites', label: 'Trusted sites' },
-    { id: 'generator', label: 'Password generator' }
+    { id: 'generator', label: 'Password generator' },
+    { id: 'trusted-sites', label: 'Trusted sites' }
 ] as const;
-
-// Verify Google Drive token is live before offering picker (not just cached).
-async function ensureGoogleDriveAuthorized(): Promise<void> {
-    try {
-        await getAccessToken();
-    } catch {
-        await connectGoogleDrive();
-    }
-}
 
 function isFilePickerCancellation(error: unknown): boolean {
     return error instanceof DOMException && error.name === 'AbortError';
@@ -137,12 +135,12 @@ export function App() {
                         <SecuritySection />
                     </section>
 
-                    <section id="trusted-sites">
-                        <TrustedHostsSection />
-                    </section>
-
                     <section id="generator">
                         <GeneratorPreferencesSection />
+                    </section>
+
+                    <section id="trusted-sites">
+                        <TrustedHostsSection />
                     </section>
                 </div>
             </div>
@@ -202,30 +200,33 @@ function SectionNav() {
     );
 }
 
-// Auto-lock timeout and clipboard auto-clear — global preferences, independent of any vault.
+// Auto-lock timeout, clipboard auto-clear, and reveal auto-hide — global preferences, independent of any vault.
 function SecuritySection() {
     const [autoLockMinutes, setAutoLockMinutes] = useState<number | undefined>(undefined);
     const [clipboardClearSeconds, setClipboardClearSecondsState] = useState<number | undefined>(undefined);
+    const [revealTimeoutSeconds, setRevealTimeoutSecondsState] = useState<number | undefined>(undefined);
     const [saved, setSaved] = useState(false);
 
     useEffect(() => {
         void getAutoLockTimeoutSeconds().then((seconds) => setAutoLockMinutes(seconds / 60));
         void getClipboardClearSeconds().then(setClipboardClearSecondsState);
+        void getRevealTimeoutSeconds().then(setRevealTimeoutSecondsState);
     }, []);
 
     async function handleSave(): Promise<void> {
-        if (autoLockMinutes === undefined || clipboardClearSeconds === undefined) {
+        if (autoLockMinutes === undefined || clipboardClearSeconds === undefined || revealTimeoutSeconds === undefined) {
             return;
         }
         const seconds = Math.max(MIN_AUTO_LOCK_TIMEOUT_SECONDS, Math.round(autoLockMinutes * 60));
         await sendToBackground({ type: 'SET_AUTO_LOCK_TIMEOUT', seconds });
         await setClipboardClearSeconds(clipboardClearSeconds);
+        await setRevealTimeoutSeconds(revealTimeoutSeconds);
         setAutoLockMinutes(seconds / 60);
         setSaved(true);
         setTimeout(() => setSaved(false), 1500);
     }
 
-    if (autoLockMinutes === undefined || clipboardClearSeconds === undefined) {
+    if (autoLockMinutes === undefined || clipboardClearSeconds === undefined || revealTimeoutSeconds === undefined) {
         return null;
     }
 
@@ -258,6 +259,19 @@ function SecuritySection() {
                     seconds after copying a password or code (0 = never)
                 </label>
             </div>
+            <div className="field-inline">
+                <label>
+                    Re-hide a revealed password or protected field after
+                    <input
+                        type="number"
+                        min={0}
+                        step="1"
+                        value={revealTimeoutSeconds}
+                        onChange={(e) => setRevealTimeoutSecondsState(Number(e.target.value))}
+                    />
+                    seconds (0 = never)
+                </label>
+            </div>
             <button type="button" onClick={() => void handleSave()}>
                 Save
             </button>
@@ -270,6 +284,7 @@ function SecuritySection() {
 // popup/content-script prompt, revocable here.
 function TrustedHostsSection() {
     const [hosts, setHosts] = useState<TrustedHost[] | undefined>(undefined);
+    const [expanded, setExpanded] = useState(false);
 
     async function refresh(): Promise<void> {
         setHosts(await listTrustedHosts());
@@ -295,16 +310,23 @@ function TrustedHostsSection() {
             {hosts.length === 0 ? (
                 <p className="hint">No sites trusted yet.</p>
             ) : (
-                <ul className="trusted-hosts-list">
-                    {hosts.map((host) => (
-                        <li key={host.domain}>
-                            <span>{host.domain}</span>
-                            <button type="button" onClick={() => void revoke(host.domain)}>
-                                Revoke
-                            </button>
-                        </li>
-                    ))}
-                </ul>
+                <>
+                    <button type="button" className="trusted-hosts-toggle" onClick={() => setExpanded((v) => !v)}>
+                        {expanded ? 'Hide' : `Show ${hosts.length} trusted site${hosts.length === 1 ? '' : 's'}`}
+                    </button>
+                    {expanded && (
+                        <ul className="trusted-hosts-list">
+                            {hosts.map((host) => (
+                                <li key={host.domain}>
+                                    <span>{host.domain}</span>
+                                    <button type="button" onClick={() => void revoke(host.domain)}>
+                                        Revoke
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </>
             )}
         </>
     );
@@ -386,7 +408,6 @@ function DatabaseSection({
         setPickError(undefined);
         try {
             if (vault.provider === 'gdrive') {
-                await ensureGoogleDriveAuthorized();
                 const picked = await showDrivePicker();
                 if (!picked) {
                     return;
@@ -553,6 +574,12 @@ function useVaultLockState(vault: ConfiguredVault) {
         void refresh();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [vault.uuid]);
+
+    // Shows the unlock form the instant a background-triggered lock (e.g. idle timeout) happens,
+    // rather than only on this page's next own status check.
+    useEffect(() => {
+        onVaultLocked(() => setStatus('locked'));
+    }, []);
 
     async function refresh(): Promise<void> {
         setStatus('checking');
@@ -770,7 +797,6 @@ function OpenVaultFlow({
         setBusy(true);
         setError(undefined);
         try {
-            await ensureGoogleDriveAuthorized();
             const picked = await showDrivePicker();
             if (!picked) {
                 return;
@@ -953,6 +979,14 @@ function BiometricSection({
     const [busy, setBusy] = useState(false);
     const [message, setMessage] = useState<{ text: string; kind: 'error' | 'success' } | undefined>(undefined);
 
+    // Starts the Drive round trip the moment this section is on the page, not on click — by
+    // enroll time the bytes are usually already there, so the WebAuthn call keeps a fresh gesture.
+    useEffect(() => {
+        if (!enrolled) {
+            prefetchForBiometricEnroll(vault);
+        }
+    }, [vault, enrolled]);
+
     if (enrolled) {
         return (
             <div>
@@ -969,7 +1003,7 @@ function BiometricSection({
         setBusy(true);
         setMessage(undefined);
         try {
-            await enroll(vault.uuid, password);
+            await enroll(vault, password);
             setPassword('');
             setMessage({ text: 'Biometric unlock enrolled.', kind: 'success' });
             await onChanged();

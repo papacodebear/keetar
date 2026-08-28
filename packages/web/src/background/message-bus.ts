@@ -67,6 +67,7 @@ export type KeetarRequest =
           passwordCandidates?: string[];
       }
     | { type: 'CAPTURE_GENERATED_PASSWORD'; password: string }
+    | { type: 'CREATE_ENTRY_FROM_GENERATED_PASSWORD'; title: string; url: string; username: string; password: string }
     | { type: 'GET_PENDING_LOGIN_PROMPT'; tabId: number }
     | { type: 'APPLY_PENDING_LOGIN_PROMPT'; tabId: number; action: 'save' | 'update' | 'dismiss'; entryUuid?: string }
     | { type: 'LOGIN_FORM_DETECTED' }
@@ -76,6 +77,7 @@ export type KeetarRequest =
     | { type: 'CREATE_ENTRY'; groupUuid: string; fields: EntryFields }
     | { type: 'UPDATE_ENTRY'; entryUuid: string; fields: EntryFields }
     | { type: 'DELETE_ENTRY'; entryUuid: string }
+    | { type: 'RETRY_SYNC' }
     | { type: 'GET_GROUP_TREE' }
     | { type: 'APPLY_AI_SORT'; assignments: { entryUuid: string; groupName: string }[] }
     | { type: 'GET_ENTRY_DETAIL'; entryUuid: string }
@@ -147,6 +149,7 @@ export type KeetarResponse =
     | { ok: true; type: 'REMOVE_DUPLICATE_ENTRIES'; removed: number }
     | { ok: true; type: 'CAPTURE_LOGIN_CREDENTIALS' }
     | { ok: true; type: 'CAPTURE_GENERATED_PASSWORD' }
+    | { ok: true; type: 'CREATE_ENTRY_FROM_GENERATED_PASSWORD'; entry: EntrySummary }
     | { ok: true; type: 'GET_PENDING_LOGIN_PROMPT'; prompt: PendingLoginPrompt | undefined }
     | { ok: true; type: 'APPLY_PENDING_LOGIN_PROMPT' }
     | { ok: true; type: 'LOGIN_FORM_DETECTED' }
@@ -156,6 +159,7 @@ export type KeetarResponse =
     | { ok: true; type: 'CREATE_ENTRY'; entry: EntrySummary }
     | { ok: true; type: 'UPDATE_ENTRY' }
     | { ok: true; type: 'DELETE_ENTRY' }
+    | { ok: true; type: 'RETRY_SYNC' }
     | { ok: true; type: 'GET_GROUP_TREE'; root: GroupNode; recycleBinGroupUuid: string | undefined }
     | { ok: true; type: 'APPLY_AI_SORT'; groupsCreated: number; entriesMoved: number; skipped: number }
     | { ok: true; type: 'GET_ENTRY_DETAIL'; entry: EntryDetail }
@@ -218,6 +222,24 @@ export type KeetarRequestHandler = (
     request: KeetarRequest,
     sender: chrome.runtime.MessageSender
 ) => Promise<KeetarResponse>;
+
+// One-way notification (no request/response) so an open Manager/Options page reacts to a
+// background-triggered lock immediately instead of on its next sendToBackground call.
+export type BackgroundBroadcast = { type: 'VAULT_LOCKED' };
+
+/** Fire-and-forget: rejects with no error surfaced when no extension page is open to receive it. */
+export function broadcastVaultLocked(): void {
+    void runtime.sendMessage<unknown>({ type: 'VAULT_LOCKED' } satisfies BackgroundBroadcast).catch(() => {});
+}
+
+/** Subscribes an extension page (Manager, Options) to background-triggered lock notifications. */
+export function onVaultLocked(callback: () => void): void {
+    chrome.runtime.onMessage.addListener((message: BackgroundBroadcast) => {
+        if (message?.type === 'VAULT_LOCKED') {
+            callback();
+        }
+    });
+}
 
 /** Registers the background service worker's single message listener. */
 export function registerMessageHandler(handle: KeetarRequestHandler): void {

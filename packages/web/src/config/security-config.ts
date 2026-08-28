@@ -2,7 +2,7 @@ import { storage } from '../platform';
 
 // Auto-lock timeout: how long the vault stays unlocked while idle before it's locked automatically.
 const STORAGE_KEY = 'keetar.autoLockTimeoutSeconds';
-export const DEFAULT_AUTO_LOCK_TIMEOUT_SECONDS = 5 * 60;
+export const DEFAULT_AUTO_LOCK_TIMEOUT_SECONDS = 15 * 60;
 // chrome.idle.setDetectionInterval enforces a 15s floor.
 export const MIN_AUTO_LOCK_TIMEOUT_SECONDS = 15;
 

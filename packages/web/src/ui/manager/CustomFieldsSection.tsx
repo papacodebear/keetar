@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { sendToBackground } from '../../background/message-bus';
+import { getRevealTimeoutSeconds } from '../../config/reveal-config';
 import type { EntryCustomField } from '../../background/vault-session';
 
 export function CustomFieldsSection({
@@ -16,11 +17,44 @@ export function CustomFieldsSection({
     const [newValue, setNewValue] = useState('');
     const [newProtected, setNewProtected] = useState(true);
     const [error, setError] = useState<string | undefined>(undefined);
+    const revealTimeoutSeconds = useRef<number | undefined>(undefined);
+    const revealTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
+    useEffect(() => {
+        void getRevealTimeoutSeconds().then((seconds) => {
+            revealTimeoutSeconds.current = seconds;
+        });
+        const timers = revealTimers.current;
+        return () => {
+            for (const timer of timers.values()) {
+                clearTimeout(timer);
+            }
+        };
+    }, []);
+
+    // Re-hides each field independently, the same "seconds after reveal" window as the main
+    // password field, so switching one custom field back on doesn't reset another's timer.
     function toggleRevealed(name: string): void {
         setRevealed((prev) => {
             const next = new Set(prev);
-            next.has(name) ? next.delete(name) : next.add(name);
+            if (next.has(name)) {
+                next.delete(name);
+                clearTimeout(revealTimers.current.get(name));
+                revealTimers.current.delete(name);
+                return next;
+            }
+            next.add(name);
+            if (revealTimeoutSeconds.current) {
+                const timer = setTimeout(() => {
+                    revealTimers.current.delete(name);
+                    setRevealed((current) => {
+                        const updated = new Set(current);
+                        updated.delete(name);
+                        return updated;
+                    });
+                }, revealTimeoutSeconds.current * 1000);
+                revealTimers.current.set(name, timer);
+            }
             return next;
         });
     }

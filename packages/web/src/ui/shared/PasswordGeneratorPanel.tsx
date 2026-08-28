@@ -32,12 +32,14 @@ export function PasswordGeneratorPanel({
     actionLabel,
     onAction,
     onClose,
-    onCopy
+    onCopy,
+    onValueChange
 }: {
     actionLabel?: string;
     onAction?: (value: string) => void;
     onClose: () => void;
     onCopy?: (value: string) => void;
+    onValueChange?: (value: string) => void;
 }) {
     const [prefsLoaded, setPrefsLoaded] = useState(false);
     const [mode, setMode] = useState<GeneratorMode>(DefaultGeneratorPreferences.mode);
@@ -76,9 +78,11 @@ export function PasswordGeneratorPanel({
                     : generatePassphrase(passphraseOptions);
             setValue(next);
             setError(undefined);
+            onValueChange?.(next);
         } catch (err) {
             setValue('');
             setError(err instanceof Error ? err.message : 'Failed to generate');
+            onValueChange?.('');
         }
         setCopied(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps

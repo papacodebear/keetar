@@ -8,7 +8,13 @@ import {
 } from '@keetar/core';
 import { installArgon2 } from './argon2-wasm';
 import { vaultSession } from './vault-session';
-import { registerMessageHandler, type KeetarResponse, type PendingLoginPrompt, type PendingPasskeyRequest } from './message-bus';
+import {
+    broadcastVaultLocked,
+    registerMessageHandler,
+    type KeetarResponse,
+    type PendingLoginPrompt,
+    type PendingPasskeyRequest
+} from './message-bus';
 import { startKeepalive } from './keepalive';
 import { action, idle, sessionStorage, tabs } from '../platform';
 import { matchEntries } from '../autofill/matcher';
@@ -43,6 +49,14 @@ async function updateToolbarIcon(): Promise<void> {
     await action.setIcon({ path: connected ? COLOR_ICON : GRAY_ICON });
 }
 void updateToolbarIcon();
+
+// Notifies any already-open Manager/Options page so it redirects immediately, rather than
+// discovering the lock only the next time it happens to call the background.
+async function lockVaultAndNotify(): Promise<void> {
+    vaultSession.lock();
+    await updateToolbarIcon();
+    broadcastVaultLocked();
+}
 
 // Bridges content-relay (stashes) to the passkey-prompt iframe (fetches) — lives only for the
 // few seconds between interception and the prompt loading, so an in-memory map is enough.
@@ -161,8 +175,7 @@ tabs.onRemoved((tabId) => {
 void getAutoLockTimeoutSeconds().then((seconds) => idle.setDetectionInterval(seconds));
 idle.onStateChanged((state) => {
     if ((state === 'idle' || state === 'locked') && vaultSession.status === 'unlocked') {
-        vaultSession.lock();
-        void updateToolbarIcon();
+        void lockVaultAndNotify();
     }
 });
 
@@ -180,8 +193,7 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
             return { ok: true, type: 'UNLOCK_VAULT_WITH_HASH', summary };
         }
         case 'LOCK_VAULT':
-            vaultSession.lock();
-            void updateToolbarIcon();
+            await lockVaultAndNotify();
             return { ok: true, type: 'LOCK_VAULT' };
         case 'GET_STATUS':
             return { ok: true, type: 'GET_STATUS', status: vaultSession.status };
@@ -238,6 +250,10 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
                 await rememberGeneratedPassword(request.password);
             }
             return { ok: true, type: 'CAPTURE_GENERATED_PASSWORD' };
+        }
+        case 'CREATE_ENTRY_FROM_GENERATED_PASSWORD': {
+            const entry = await vaultSession.createEntryFromGeneratedPassword(request);
+            return { ok: true, type: 'CREATE_ENTRY_FROM_GENERATED_PASSWORD', entry };
         }
         case 'GET_PENDING_LOGIN_PROMPT':
             return { ok: true, type: 'GET_PENDING_LOGIN_PROMPT', prompt: await pendingLoginPrompt(request.tabId) };
@@ -330,6 +346,9 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
         case 'DELETE_ENTRY':
             await vaultSession.deleteEntry(request.entryUuid);
             return { ok: true, type: 'DELETE_ENTRY' };
+        case 'RETRY_SYNC':
+            await vaultSession.retrySync();
+            return { ok: true, type: 'RETRY_SYNC' };
         case 'GET_GROUP_TREE': {
             const { root, recycleBinGroupUuid } = vaultSession.getGroupTree();
             return { ok: true, type: 'GET_GROUP_TREE', root, recycleBinGroupUuid };

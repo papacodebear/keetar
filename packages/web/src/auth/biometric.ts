@@ -7,7 +7,10 @@ import {
     removeBiometricRecord,
     saveBiometricRecord
 } from './biometric-store';
-import { ensureVaultFilePermission, LocalFileProvider } from '../providers/local-file';
+import { ensureVaultFilePermission } from '../providers/local-file';
+import { createFileProvider } from '../providers';
+import { readCacheBlob } from '../providers/opfs-cache';
+import type { ConfiguredVault } from '../config/vault-config';
 
 // Enroll + unlock orchestration; enrollment is scoped, ephemeral (§6.2, §8.1).
 
@@ -15,11 +18,23 @@ export async function isBiometricEnrolled(vaultUuid: string): Promise<boolean> {
     return (await getBiometricRecord(vaultUuid)) !== undefined;
 }
 
-export async function enroll(vaultUuid: string, password: string): Promise<void> {
+// Kicked off when the Options page's biometric section mounts, well before any click — so even a
+// vault with no local cache yet has its Drive round trip done long before enroll() needs the bytes.
+const prefetchedReads = new Map<string, Promise<ArrayBuffer>>();
+
+export function prefetchForBiometricEnroll(vault: ConfiguredVault): void {
+    if (vault.provider === 'gdrive' && !prefetchedReads.has(vault.uuid)) {
+        prefetchedReads.set(vault.uuid, createFileProvider(vault).read(vault.path ?? ''));
+    }
+}
+
+export async function enroll(vault: ConfiguredVault, password: string): Promise<void> {
     // Verify password before enrolling; typo fails now, not at first unlock (§6.2).
-    await ensureVaultFilePermission(vaultUuid);
-    const provider = new LocalFileProvider(vaultUuid);
-    const data = await provider.read('');
+    // File System Access permission is a local-file-only concept; Drive uses its own stored OAuth token.
+    if (vault.provider === 'local-file') {
+        await ensureVaultFilePermission(vault.uuid);
+    }
+    const data = await readForVerification(vault);
     const credentials = new KdbxCredentials(ProtectedValue.fromString(password));
     await Kdbx.load(data, credentials); // throws if the password is wrong; result itself is discarded
 
@@ -29,18 +44,35 @@ export async function enroll(vaultUuid: string, password: string): Promise<void>
     const passwordHash = ByteUtils.arrayToBuffer(credentials.passwordHash.getBinary());
 
     const prfSalt = globalThis.crypto.getRandomValues(new Uint8Array(32)).buffer;
-    const { credentialId, vuk } = await enrollCredential(vaultUuid, prfSalt);
+    const { credentialId, vuk } = await enrollCredential(vault.uuid, prfSalt);
     try {
         const wrappedPasswordHash = await SessionKey.wrapKeyMaterial(passwordHash, vuk);
-        await saveBiometricRecord(vaultUuid, {
+        await saveBiometricRecord(vault.uuid, {
             credentialIdBase64: bufferToBase64(credentialId),
             prfSaltBase64: bufferToBase64(prfSalt),
             wrappedPasswordHashBase64: bufferToBase64(wrappedPasswordHash),
             enrolledAt: new Date().toISOString()
         });
+        prefetchedReads.delete(vault.uuid);
     } finally {
         // VUK and credentials out of scope (§6.2).
     }
+}
+
+// The WebAuthn ceremony right after this needs a still-fresh user gesture, which a Drive round
+// trip can burn through (Firefox then rejects it as "the operation is insecure") — prefer a cache hit.
+async function readForVerification(vault: ConfiguredVault): Promise<ArrayBuffer> {
+    if (vault.provider === 'gdrive') {
+        const cached = await readCacheBlob(vault.uuid);
+        if (cached) {
+            return cached;
+        }
+        const prefetched = prefetchedReads.get(vault.uuid);
+        if (prefetched) {
+            return prefetched;
+        }
+    }
+    return createFileProvider(vault).read(vault.path ?? '');
 }
 
 export async function removeEnrollment(vaultUuid: string): Promise<void> {

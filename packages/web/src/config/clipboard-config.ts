@@ -2,7 +2,7 @@ import { storage } from '../platform';
 
 // How long a copied credential stays on the clipboard before Keetar clears it. 0 = never clear.
 const STORAGE_KEY = 'keetar.clipboardClearSeconds';
-export const DEFAULT_CLIPBOARD_CLEAR_SECONDS = 10;
+export const DEFAULT_CLIPBOARD_CLEAR_SECONDS = 30;
 
 export async function getClipboardClearSeconds(): Promise<number> {
     const stored = await storage.get<number>(STORAGE_KEY);

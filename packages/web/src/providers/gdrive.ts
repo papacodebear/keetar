@@ -46,6 +46,15 @@ export async function isGoogleDriveConnected(): Promise<boolean> {
     return (await loadTokens(PROVIDER_KEY)) !== undefined;
 }
 
+// Verify Google Drive token is live before offering picker (not just cached).
+export async function ensureGoogleDriveAuthorized(): Promise<void> {
+    try {
+        await getAccessToken();
+    } catch {
+        await connectGoogleDrive();
+    }
+}
+
 export async function disconnectGoogleDrive(): Promise<void> {
     const stored = await loadTokens(PROVIDER_KEY);
     await removeTokens(PROVIDER_KEY);

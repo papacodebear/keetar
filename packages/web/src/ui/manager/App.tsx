@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ByteUtils, estimatePasswordEntropy, type PasswordHealthFinding } from '@keetar/core';
-import { sendToBackground } from '../../background/message-bus';
+import { onVaultLocked, sendToBackground } from '../../background/message-bus';
+import type { KeetarRequest, KeetarResponse } from '../../background/message-bus';
 import { EntryIcon } from '../shared/EntryIcon';
 import { VaultProviderIcon } from '../shared/VaultProviderIcon';
 import { PasswordGeneratorPanel } from '../shared/PasswordGeneratorPanel';
@@ -10,9 +11,10 @@ import { buildAiSortExport, diffAiSortAssignments, parseAiSortResponse } from '.
 import { CustomFieldsSection } from './CustomFieldsSection';
 import { PasskeySection } from './PasskeySection';
 import { getSortedEntryUuids, markEntriesSorted } from './ai-sort-tracker';
-import { connectGoogleDrive, getAccessToken, GoogleDriveProvider } from '../../providers/gdrive';
+import { GoogleDriveProvider } from '../../providers/gdrive';
 import { showDrivePicker } from '../../providers/gdrive-picker';
 import { clearConfiguredVault, getConfiguredVault } from '../../config/vault-config';
+import { getRevealTimeoutSeconds } from '../../config/reveal-config';
 import type { VaultBackend } from '../../config/vault-config';
 import type { AiSortDiff } from './ai-sort';
 import type {
@@ -27,13 +29,15 @@ import type {
 
 // Full vault management post-unlock: entries, groups, attachments (§8.1–8.2); shares background session with Popup.
 
-// Verify Google Drive token is live before offering picker (not just cached).
-async function ensureGoogleDriveAuthorized(): Promise<void> {
-    try {
-        await getAccessToken();
-    } catch {
-        await connectGoogleDrive();
-    }
+// Custom type so drop targets ignore drags of anything else (e.g. text dragged in from outside).
+const ENTRY_DRAG_MIME_TYPE = 'application/x-keetar-entry-uuid';
+
+// A mutation always applies in-session, but persist() (the Drive re-upload) can still fail —
+// surface that even for callers that only cared about response.ok for the success payload.
+async function sendMutation(request: KeetarRequest, onSyncError: (error: string | undefined) => void): Promise<KeetarResponse> {
+    const response = await sendToBackground(request);
+    onSyncError(response.ok ? undefined : response.error);
+    return response;
 }
 
 type AppState =
@@ -56,6 +60,12 @@ export function App() {
 
     useEffect(() => {
         void init();
+    }, []);
+
+    // Redirects the instant the vault locks (e.g. idle timeout), not on whatever the next
+    // background call happens to be — Manager is read-only anyway once locked.
+    useEffect(() => {
+        onVaultLocked(() => setState({ kind: 'locked' }));
     }, []);
 
     // Distinguishes "locked, unlock from the popup" from "nothing configured at all" (e.g. after Disconnect).
@@ -154,6 +164,8 @@ function Ready({
 }) {
     const selectedGroup = findGroup(root, selectedGroupUuid) ?? root;
     const selectedGroupIsInRecycleBin = isGroupInRecycleBin(root, selectedGroupUuid, recycleBinGroupUuid);
+    const [syncError, setSyncError] = useState<string | undefined>(undefined);
+    const [retryingSync, setRetryingSync] = useState(false);
     const [healthReport, setHealthReport] = useState<PasswordHealthReport | undefined>(undefined);
     const [duplicateGroups, setDuplicateGroups] = useState<DuplicateCredentialGroup[] | undefined>(undefined);
     const [healthError, setHealthError] = useState<string | undefined>(undefined);
@@ -303,7 +315,7 @@ function Ready({
         if (!name) {
             return;
         }
-        const response = await sendToBackground({ type: 'CREATE_GROUP', parentGroupUuid, name });
+        const response = await sendMutation({ type: 'CREATE_GROUP', parentGroupUuid, name }, setSyncError);
         if (response.ok && response.type === 'CREATE_GROUP') {
             await onReload({ groupUuid: response.group.uuid });
         }
@@ -314,7 +326,7 @@ function Ready({
         if (!name || name === currentName) {
             return;
         }
-        await sendToBackground({ type: 'RENAME_GROUP', groupUuid, name });
+        await sendMutation({ type: 'RENAME_GROUP', groupUuid, name }, setSyncError);
         await onReload({ groupUuid: selectedGroupUuid, entryUuid: selectedEntryUuid });
     }
 
@@ -322,16 +334,24 @@ function Ready({
         if (!window.confirm('Delete this group and everything in it?')) {
             return;
         }
-        await sendToBackground({ type: 'DELETE_GROUP', groupUuid });
+        await sendMutation({ type: 'DELETE_GROUP', groupUuid }, setSyncError);
         await onReload({ groupUuid: root.uuid });
     }
 
-    async function createEntry(): Promise<void> {
-        const response = await sendToBackground({
-            type: 'CREATE_ENTRY',
+    // Drag-and-drop counterpart to the "Group" dropdown in the entry detail panel.
+    async function moveEntryToGroup(entryUuid: string, toGroupUuid: string): Promise<void> {
+        await sendMutation({ type: 'MOVE_ENTRY', entryUuid, toGroupUuid }, setSyncError);
+        await onReload({
             groupUuid: selectedGroupUuid,
-            fields: { title: 'New entry' }
+            entryUuid: selectedEntryUuid === entryUuid ? undefined : selectedEntryUuid
         });
+    }
+
+    async function createEntry(): Promise<void> {
+        const response = await sendMutation(
+            { type: 'CREATE_ENTRY', groupUuid: selectedGroupUuid, fields: { title: 'New entry' } },
+            setSyncError
+        );
         if (response.ok && response.type === 'CREATE_ENTRY') {
             await onReload({ groupUuid: selectedGroupUuid, entryUuid: response.entry.uuid });
         }
@@ -352,14 +372,37 @@ function Ready({
         if (!window.confirm('Permanently delete everything in the Recycle Bin? This cannot be undone.')) {
             return;
         }
-        const response = await sendToBackground({ type: 'EMPTY_RECYCLE_BIN' });
+        const response = await sendMutation({ type: 'EMPTY_RECYCLE_BIN' }, setSyncError);
         if (response.ok && response.type === 'EMPTY_RECYCLE_BIN') {
             await onReload({ groupUuid: selectedGroupUuid });
         }
     }
 
+    async function retrySync(): Promise<void> {
+        setRetryingSync(true);
+        try {
+            await sendMutation({ type: 'RETRY_SYNC' }, setSyncError);
+        } finally {
+            setRetryingSync(false);
+        }
+    }
+
     return (
-        <div className="layout">
+        <>
+            {syncError && (
+                <div className="sync-error-banner">
+                    <span>Your last change didn't sync to {vaultProvider === 'gdrive' ? 'Google Drive' : 'the database file'}: {syncError}</span>
+                    <div className="sync-error-banner-actions">
+                        <button type="button" disabled={retryingSync} onClick={() => void retrySync()}>
+                            {retryingSync ? 'Retrying…' : 'Retry Sync'}
+                        </button>
+                        <button type="button" disabled={retryingSync} onClick={() => setSyncError(undefined)}>
+                            Dismiss
+                        </button>
+                    </div>
+                </div>
+            )}
+            <div className="layout">
             <div className="tree-pane">
                 <div className="vault-badge">
                     <VaultProviderIcon provider={vaultProvider} />
@@ -470,6 +513,7 @@ function Ready({
                     onCreateChild={createGroup}
                     onRename={renameGroup}
                     onDelete={deleteGroup}
+                    onDropEntry={moveEntryToGroup}
                     isInRecycleBin={false}
                     isRoot
                 />
@@ -527,6 +571,11 @@ function Ready({
                             <div
                                 key={entry.uuid}
                                 className={`entry-row${entry.uuid === selectedEntryUuid ? ' selected' : ''}`}
+                                draggable
+                                onDragStart={(e) => {
+                                    e.dataTransfer.setData(ENTRY_DRAG_MIME_TYPE, entry.uuid);
+                                    e.dataTransfer.effectAllowed = 'move';
+                                }}
                                 onClick={() => selectEntry(entry.uuid)}
                                 onDoubleClick={() => openEntryUrl(entry.urls[0] ?? '')}
                             >
@@ -572,6 +621,7 @@ function Ready({
                         entryUuid={selectedEntryUuid}
                         root={root}
                         recycleBinGroupUuid={recycleBinGroupUuid}
+                        onSyncError={setSyncError}
                         onChanged={() => onReload({ groupUuid: selectedGroupUuid, entryUuid: selectedEntryUuid })}
                         onDeleted={() => {
                             void onReload({ groupUuid: selectedGroupUuid });
@@ -586,7 +636,8 @@ function Ready({
                     </p>
                 )}
             </div>
-        </div>
+            </div>
+        </>
     );
 }
 
@@ -1076,7 +1127,6 @@ function CombineVaultsPanel({
         setError(undefined);
         setDrivePickBusy(true);
         try {
-            await ensureGoogleDriveAuthorized();
             const picked = await showDrivePicker();
             if (picked) {
                 setDrivePick(picked);
@@ -1277,6 +1327,7 @@ function GroupTreeNode({
     onCreateChild,
     onRename,
     onDelete,
+    onDropEntry,
     isInRecycleBin,
     isRoot
 }: {
@@ -1288,6 +1339,7 @@ function GroupTreeNode({
     onCreateChild: (parentUuid: string) => Promise<void>;
     onRename: (uuid: string, currentName: string) => Promise<void>;
     onDelete: (uuid: string) => Promise<void>;
+    onDropEntry: (entryUuid: string, toGroupUuid: string) => Promise<void>;
     isInRecycleBin: boolean;
     isRoot?: boolean;
 }) {
@@ -1295,11 +1347,39 @@ function GroupTreeNode({
     // Recycle Bin always sorts to the bottom, set off by a separator, instead of wherever its name lands alphabetically.
     const regularGroups = node.groups.filter((group) => group.uuid !== recycleBinGroupUuid);
     const recycleBin = node.groups.find((group) => group.uuid === recycleBinGroupUuid);
+    const [dragOver, setDragOver] = useState(false);
     return (
         <div className="tree-node">
             <div
-                className={`tree-node-label${node.uuid === selectedGroupUuid ? ' selected' : ''}`}
+                className={`tree-node-label${node.uuid === selectedGroupUuid ? ' selected' : ''}${dragOver ? ' drag-over' : ''}`}
                 onClick={() => onSelect(node.uuid)}
+                onDragOver={(e) => {
+                    if (e.dataTransfer.types.includes(ENTRY_DRAG_MIME_TYPE)) {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                    }
+                }}
+                onDragEnter={(e) => {
+                    if (e.dataTransfer.types.includes(ENTRY_DRAG_MIME_TYPE)) {
+                        setDragOver(true);
+                    }
+                }}
+                onDragLeave={(e) => {
+                    // Moving onto a child (the name span, action buttons) also fires dragleave on
+                    // the parent — only clear once the pointer actually leaves this element's subtree.
+                    const enteredElement = e.relatedTarget as Node | null;
+                    if (!enteredElement || !e.currentTarget.contains(enteredElement)) {
+                        setDragOver(false);
+                    }
+                }}
+                onDrop={(e) => {
+                    setDragOver(false);
+                    const entryUuid = e.dataTransfer.getData(ENTRY_DRAG_MIME_TYPE);
+                    if (entryUuid) {
+                        e.preventDefault();
+                        void onDropEntry(entryUuid, node.uuid);
+                    }
+                }}
             >
                 <span className="tree-node-name">{node.name || '(unnamed)'}</span>
                 {isRecycleBin && <span className="recycle-bin-icon" aria-hidden="true">🗑</span>}
@@ -1358,6 +1438,7 @@ function GroupTreeNode({
                             onCreateChild={onCreateChild}
                             onRename={onRename}
                             onDelete={onDelete}
+                            onDropEntry={onDropEntry}
                             isInRecycleBin={isInRecycleBin}
                         />
                     ))}
@@ -1374,6 +1455,7 @@ function GroupTreeNode({
                                 onCreateChild={onCreateChild}
                                 onRename={onRename}
                                 onDelete={onDelete}
+                                onDropEntry={onDropEntry}
                                 isInRecycleBin
                             />
                         </>
@@ -1432,12 +1514,14 @@ function EntryDetailPanel({
     entryUuid,
     root,
     recycleBinGroupUuid,
+    onSyncError,
     onChanged,
     onDeleted
 }: {
     entryUuid: string;
     root: GroupNode;
     recycleBinGroupUuid: string | undefined;
+    onSyncError: (error: string | undefined) => void;
     onChanged: () => void;
     onDeleted: () => void;
 }) {
@@ -1447,10 +1531,24 @@ function EntryDetailPanel({
     const [savedFlash, setSavedFlash] = useState(false);
     const [fetchingFavicon, setFetchingFavicon] = useState(false);
     const [faviconError, setFaviconError] = useState<string | undefined>(undefined);
+    const [revealTimeoutSeconds, setRevealTimeoutSeconds] = useState<number | undefined>(undefined);
 
     useEffect(() => {
         void load();
     }, [entryUuid]);
+
+    useEffect(() => {
+        void getRevealTimeoutSeconds().then(setRevealTimeoutSeconds);
+    }, []);
+
+    // Re-hides the password automatically after the configured reveal window; 0 means never.
+    useEffect(() => {
+        if (!showPassword || !revealTimeoutSeconds) {
+            return;
+        }
+        const timer = setTimeout(() => setShowPassword(false), revealTimeoutSeconds * 1000);
+        return () => clearTimeout(timer);
+    }, [showPassword, revealTimeoutSeconds]);
 
     async function load(): Promise<void> {
         const response = await sendToBackground({ type: 'GET_ENTRY_DETAIL', entryUuid });
@@ -1466,9 +1564,11 @@ function EntryDetailPanel({
         if (!entry || entry[field] === value) {
             return;
         }
-        await sendToBackground({ type: 'UPDATE_ENTRY', entryUuid, fields: { [field]: value } });
+        const response = await sendMutation({ type: 'UPDATE_ENTRY', entryUuid, fields: { [field]: value } }, onSyncError);
         setEntry({ ...entry, [field]: value });
-        flashSaved();
+        if (response.ok) {
+            flashSaved();
+        }
         onChanged();
     }
 
@@ -1481,7 +1581,7 @@ function EntryDetailPanel({
         if (!window.confirm('Delete this entry?')) {
             return;
         }
-        await sendToBackground({ type: 'DELETE_ENTRY', entryUuid });
+        await sendMutation({ type: 'DELETE_ENTRY', entryUuid }, onSyncError);
         onDeleted();
     }
 
@@ -1489,27 +1589,31 @@ function EntryDetailPanel({
         if (toGroupUuid === entry?.groupUuid) {
             return;
         }
-        await sendToBackground({ type: 'MOVE_ENTRY', entryUuid, toGroupUuid });
+        await sendMutation({ type: 'MOVE_ENTRY', entryUuid, toGroupUuid }, onSyncError);
         onChanged();
     }
 
     async function cloneFrom(sourceEntryUuid: string | undefined): Promise<void> {
-        await sendToBackground({ type: 'SET_ENTRY_CLONE', entryUuid, sourceEntryUuid });
+        const response = await sendMutation({ type: 'SET_ENTRY_CLONE', entryUuid, sourceEntryUuid }, onSyncError);
         await load();
-        flashSaved();
+        if (response.ok) {
+            flashSaved();
+        }
         onChanged();
     }
 
     async function addAttachment(file: File): Promise<void> {
         const buffer = await file.arrayBuffer();
         const dataBase64 = ByteUtils.bytesToBase64(new Uint8Array(buffer));
-        await sendToBackground({ type: 'ADD_ATTACHMENT', entryUuid, name: file.name, dataBase64 });
+        const response = await sendMutation({ type: 'ADD_ATTACHMENT', entryUuid, name: file.name, dataBase64 }, onSyncError);
         await load();
-        flashSaved();
+        if (response.ok) {
+            flashSaved();
+        }
     }
 
     async function removeAttachment(name: string): Promise<void> {
-        await sendToBackground({ type: 'REMOVE_ATTACHMENT', entryUuid, name });
+        await sendMutation({ type: 'REMOVE_ATTACHMENT', entryUuid, name }, onSyncError);
         await load();
     }
 

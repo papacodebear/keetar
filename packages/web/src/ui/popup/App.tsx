@@ -43,6 +43,8 @@ type ViewState =
           matchedUuids: Set<string>;
           pendingLoginPrompt: PendingLoginPrompt | undefined;
           activeTabId: number | undefined;
+          activeTabUrl: string | undefined;
+          activeTabTitle: string | undefined;
       };
 
 export function App() {
@@ -104,7 +106,9 @@ export function App() {
                 pendingResponse?.ok && pendingResponse.type === 'GET_PENDING_LOGIN_PROMPT'
                     ? pendingResponse.prompt
                     : undefined,
-            activeTabId: tab?.id
+            activeTabId: tab?.id,
+            activeTabUrl: tab?.url,
+            activeTabTitle: tab?.title
         });
     }
 
@@ -213,6 +217,8 @@ export function App() {
                     matchedUuids={view.matchedUuids}
                     pendingLoginPrompt={view.pendingLoginPrompt}
                     activeTabId={view.activeTabId}
+                    activeTabUrl={view.activeTabUrl}
+                    activeTabTitle={view.activeTabTitle}
                     onLoginPromptHandled={loadEntries}
                     onLock={handleLock}
                     onDisconnect={handleDisconnect}
@@ -435,6 +441,8 @@ function UnlockedView({
     matchedUuids,
     pendingLoginPrompt,
     activeTabId,
+    activeTabUrl,
+    activeTabTitle,
     onLoginPromptHandled,
     onLock,
     onDisconnect
@@ -445,12 +453,17 @@ function UnlockedView({
     matchedUuids: Set<string>;
     pendingLoginPrompt: PendingLoginPrompt | undefined;
     activeTabId: number | undefined;
+    activeTabUrl: string | undefined;
+    activeTabTitle: string | undefined;
     onLoginPromptHandled: () => Promise<void>;
     onLock: () => Promise<void>;
     onDisconnect: () => Promise<void>;
 }) {
     const [toast, setToast] = useState('');
     const [showGenerator, setShowGenerator] = useState(false);
+    const [generatedValue, setGeneratedValue] = useState('');
+    const [newEntryUsername, setNewEntryUsername] = useState('');
+    const [savingNewEntry, setSavingNewEntry] = useState(false);
     const [pendingTrust, setPendingTrust] = useState<{ origin: string; run: () => Promise<void> } | undefined>(undefined);
     const matchedEntries = entries.filter((entry) => matchedUuids.has(entry.uuid));
 
@@ -491,6 +504,37 @@ function UnlockedView({
 
     function rememberGeneratedPassword(value: string): void {
         void sendToBackground({ type: 'CAPTURE_GENERATED_PASSWORD', password: value });
+    }
+
+    function toggleGenerator(): void {
+        setShowGenerator((v) => !v);
+        setGeneratedValue('');
+        setNewEntryUsername('');
+    }
+
+    // Offered only when nothing already matches this site — we have the URL and the freshly
+    // generated password right here, no need to wait for a form submission to capture them.
+    async function saveGeneratedPasswordAsEntry(): Promise<void> {
+        if (!activeTabUrl || !generatedValue) {
+            return;
+        }
+        setSavingNewEntry(true);
+        try {
+            const response = await sendToBackground({
+                type: 'CREATE_ENTRY_FROM_GENERATED_PASSWORD',
+                title: activeTabTitle || safeOrigin(activeTabUrl) || activeTabUrl,
+                url: activeTabUrl,
+                username: newEntryUsername,
+                password: generatedValue
+            });
+            if (response.ok) {
+                showToast('Entry saved');
+                setShowGenerator(false);
+                await onLoginPromptHandled();
+            }
+        } finally {
+            setSavingNewEntry(false);
+        }
     }
 
     async function fill(entryUuid: string): Promise<void> {
@@ -572,7 +616,7 @@ function UnlockedView({
                         Detect fields
                     </button>
                 )}
-                <button type="button" onClick={() => setShowGenerator((v) => !v)} title="Generate a password">
+                <button type="button" onClick={toggleGenerator} title="Generate a password">
                     🎲 Generate
                 </button>
             </div>
@@ -581,7 +625,18 @@ function UnlockedView({
                     <PasswordGeneratorPanel
                         onClose={() => setShowGenerator(false)}
                         onCopy={rememberGeneratedPassword}
+                        onValueChange={setGeneratedValue}
                     />
+                    {matchedEntries.length === 0 && activeTabUrl && (
+                        <NewEntryFromGeneratedPasswordCard
+                            url={activeTabUrl}
+                            username={newEntryUsername}
+                            onUsernameChange={setNewEntryUsername}
+                            busy={savingNewEntry}
+                            disabled={!generatedValue}
+                            onSave={() => void saveGeneratedPasswordAsEntry()}
+                        />
+                    )}
                 </div>
             )}
             {toast && <p className="copy-toast">{toast}</p>}
@@ -692,6 +747,41 @@ function PendingLoginPromptCard({
                 </button>
             </div>
             {error && <ErrorBox message={error} />}
+        </div>
+    );
+}
+
+function NewEntryFromGeneratedPasswordCard({
+    url,
+    username,
+    onUsernameChange,
+    busy,
+    disabled,
+    onSave
+}: {
+    url: string;
+    username: string;
+    onUsernameChange: (value: string) => void;
+    busy: boolean;
+    disabled: boolean;
+    onSave: () => void;
+}) {
+    return (
+        <div className="login-prompt new-entry-prompt">
+            <strong>No saved entry for {safeOrigin(url) ? new URL(url).hostname : url}</strong>
+            <input
+                type="text"
+                autoComplete="off"
+                placeholder="Username"
+                value={username}
+                onChange={(e) => onUsernameChange(e.target.value)}
+                disabled={busy}
+            />
+            <div className="login-prompt-actions">
+                <button type="button" disabled={busy || disabled} onClick={onSave}>
+                    Save new entry
+                </button>
+            </div>
         </div>
     );
 }

@@ -1,6 +1,13 @@
 import { loadGooglePicker } from 'google-picker-offline-loader';
 import { isChrome } from '../platform';
-import { DRIVE_SCOPE, GOOGLE_CLIENT_ID, GOOGLE_PICKER_API_KEY, GOOGLE_PICKER_APP_ID, getAccessToken } from './gdrive';
+import {
+    DRIVE_SCOPE,
+    GOOGLE_CLIENT_ID,
+    GOOGLE_PICKER_API_KEY,
+    GOOGLE_PICKER_APP_ID,
+    ensureGoogleDriveAuthorized,
+    getAccessToken
+} from './gdrive';
 
 // PickerBuilder.setAppId missing from types but exists at runtime—augment locally for proper typing downstream.
 declare module 'google-picker-offline-loader' {
@@ -11,8 +18,17 @@ declare module 'google-picker-offline-loader' {
 
 // UNVERIFIED: setVisible needs real OAuth token + key to test end-to-end (still placeholders, see §7.3).
 export async function showDrivePicker(): Promise<{ fileId: string; name: string } | undefined> {
-    // Chrome reuses extension's token; Firefox bridge runs separate implicit-grant (see showDrivePickerViaBridge).
-    return isChrome ? showDrivePickerDirect(await getAccessToken()) : showDrivePickerViaBridge();
+    // Firefox's bridge always runs its own separate Google auth, so authorizing first would just
+    // double-prompt — connect it only after a file is picked (still needed for ongoing sync).
+    if (isChrome) {
+        await ensureGoogleDriveAuthorized();
+        return showDrivePickerDirect(await getAccessToken());
+    }
+    const picked = await showDrivePickerViaBridge();
+    if (picked) {
+        await ensureGoogleDriveAuthorized();
+    }
+    return picked;
 }
 
 async function showDrivePickerDirect(accessToken: string): Promise<{ fileId: string; name: string } | undefined> {

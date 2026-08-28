@@ -52,6 +52,7 @@
       }
       .tree-node-label:hover { background: rgba(127, 127, 127, 0.12); }
       .tree-node-label.selected { background: rgba(60, 130, 246, 0.18); }
+      .tree-node-label.drag-over { background: rgba(60, 130, 246, 0.3); outline: 2px dashed #2563eb; outline-offset: -2px; }
       .tree-node-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
       .recycle-bin-icon { flex-shrink: 0; }
       .tree-node-actions { display: none; gap: 0.15rem; }
@@ -75,7 +76,7 @@
         gap: 0.5rem;
         padding: 0.5rem;
         border-bottom: 1px solid #f0f0f0;
-        cursor: pointer;
+        cursor: grab;
       }
       .entry-row:hover { background: rgba(127, 127, 127, 0.08); }
       .entry-row.selected { background: rgba(60, 130, 246, 0.15); }
@@ -145,6 +146,24 @@
       .error-box-title { font-size: 0.85em; font-weight: 700; color: #c00; }
       .error-box-message { margin: 0; font-size: 0.8em; color: #c00; }
       .save-indicator { color: #2a7a2a; font-size: 0.85em; }
+      .sync-error-banner {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.5rem 1rem;
+        background: #c00;
+        color: #fff;
+        font-size: 0.85em;
+      }
+      .sync-error-banner-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+      .sync-error-banner button { border: 1px solid #fff; border-radius: 4px; background: transparent; color: #fff; cursor: pointer; }
+      .sync-error-banner button:disabled { opacity: 0.6; cursor: default; }
     </style>
   </head>
   <body>

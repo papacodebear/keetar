@@ -19,16 +19,27 @@ export async function enrollCredential(vaultUuid: string, prfSalt: ArrayBuffer):
     }
     const userId = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(vaultUuid));
     const prfExtension: PrfExtensionInput = { prf: { eval: { first: prfSalt } } };
-    const credential = (await navigator.credentials.create({
-        publicKey: {
-            challenge: globalThis.crypto.getRandomValues(new Uint8Array(32)),
-            rp: { name: 'Keetar' },
-            user: { id: userId, name: 'Keetar vault', displayName: 'Keetar vault' },
-            pubKeyCredParams: [{ type: 'public-key', alg: -7 }], // ES256
-            authenticatorSelection: { userVerification: 'required' },
-            extensions: prfExtension as AuthenticationExtensionsClientInputs
-        }
-    })) as PublicKeyCredential | null;
+    let credential: PublicKeyCredential | null;
+    try {
+        credential = (await navigator.credentials.create({
+            publicKey: {
+                challenge: globalThis.crypto.getRandomValues(new Uint8Array(32)),
+                rp: { name: 'Keetar' },
+                user: { id: userId, name: 'Keetar vault', displayName: 'Keetar vault' },
+                pubKeyCredParams: [{ type: 'public-key', alg: -7 }], // ES256
+                authenticatorSelection: { userVerification: 'required' },
+                extensions: prfExtension as AuthenticationExtensionsClientInputs
+            }
+        })) as PublicKeyCredential | null;
+    } catch (e) {
+        console.error('[keetar] navigator.credentials.create() failed', {
+            error: e,
+            name: e instanceof DOMException ? e.name : undefined,
+            message: e instanceof Error ? e.message : String(e),
+            origin: typeof location !== 'undefined' ? location.origin : undefined
+        });
+        throw e;
+    }
     if (!credential) {
         throw new Error('credential creation was cancelled');
     }

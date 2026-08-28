@@ -710,6 +710,25 @@ class VaultSession {
         await this.persist();
     }
 
+    /** Saves a freshly generated password as a new entry (title/url always set, unlike loginFields — there's no existing entry whose title we'd risk clobbering). */
+    async createEntryFromGeneratedPassword(input: { title: string; url: string; username: string; password: string }): Promise<EntrySummary> {
+        const db = this.requireUnlocked();
+        const entry = db.createEntry(db.getDefaultGroup());
+        applyFields(db, entry, {
+            title: input.title.trim() || input.url,
+            username: input.username,
+            password: input.password,
+            url: input.url
+        });
+        try {
+            await this.applyFaviconToEntry(db, entry);
+        } catch {
+            // A favicon is an enhancement; it must not prevent the credential from being saved.
+        }
+        await this.persist();
+        return summarizeEntry(entry);
+    }
+
     /** Saves a reviewed login capture at the vault root and fetches its favicon when available. */
     async createEntryFromCapturedLogin(login: CapturedLogin & { username: string; password: string }): Promise<EntrySummary> {
         const db = this.requireUnlocked();
@@ -1079,6 +1098,11 @@ class VaultSession {
             throw new Error('attachment not found');
         }
         return ByteUtils.bytesToBase64(resolveBinary(binary));
+    }
+
+    /** Re-attempts the last (failed) persist — the in-session edit already applied, only the Drive upload needs retrying. */
+    async retrySync(): Promise<void> {
+        await this.persist();
     }
 
     // Serialize entire tree; failure surfaces as error on triggering mutation (§14).

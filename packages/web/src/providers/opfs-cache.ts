@@ -22,7 +22,7 @@ function metaFileName(uuid: string): string {
     return `vault-${uuid}.meta.json`;
 }
 
-async function readCacheBlob(uuid: string): Promise<ArrayBuffer | undefined> {
+export async function readCacheBlob(uuid: string): Promise<ArrayBuffer | undefined> {
     const store = await getKvStore();
     return store.read(blobFileName(uuid));
 }

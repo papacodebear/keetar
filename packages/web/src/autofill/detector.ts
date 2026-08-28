@@ -12,6 +12,18 @@ const NAME_ID_USERNAME_PATTERN = /user|login|email/i;
 const LABEL_PASSWORD_PATTERN = /password/i;
 const LABEL_USERNAME_PATTERN = /username|e-?mail/i;
 
+// Types a username guess may land on; excludes radio/checkbox/submit/hidden/etc, which the
+// name/id/label/placeholder heuristics below would otherwise happily match text against.
+const TEXT_LIKE_INPUT_TYPES = new Set(['text', 'email', 'tel', 'search', 'url']);
+
+function isTextLikeInput(input: HTMLInputElement): boolean {
+    return TEXT_LIKE_INPUT_TYPES.has(input.type);
+}
+
+function isPasswordInput(input: HTMLInputElement): boolean {
+    return input.type === 'password';
+}
+
 // Detects a login form (username-only is valid for multi-step flows, §5.2); merges strategies via ??= so one partial match can't block a more complete one.
 export function detectLoginForm(root: ParentNode = document): DetectedLoginForm | undefined {
     const strategies: Strategy[] = [
@@ -86,9 +98,9 @@ function byNameOrId(root: ParentNode): DetectedLoginForm | undefined {
     let passwordField: HTMLInputElement | undefined;
     for (const input of queryAll(root, 'input')) {
         const haystack = `${input.name} ${input.id}`;
-        if (!passwordField && NAME_ID_PASSWORD_PATTERN.test(haystack)) {
+        if (!passwordField && isPasswordInput(input) && NAME_ID_PASSWORD_PATTERN.test(haystack)) {
             passwordField = input;
-        } else if (!usernameField && NAME_ID_USERNAME_PATTERN.test(haystack)) {
+        } else if (!usernameField && isTextLikeInput(input) && NAME_ID_USERNAME_PATTERN.test(haystack)) {
             usernameField = input;
         }
     }
@@ -102,9 +114,15 @@ function byLabelText(root: ParentNode): DetectedLoginForm | undefined {
     for (const label of Array.from(root.querySelectorAll('label'))) {
         const text = label.textContent ?? '';
         if (!passwordField && LABEL_PASSWORD_PATTERN.test(text)) {
-            passwordField = resolveLabelTarget(label);
+            const target = resolveLabelTarget(label);
+            if (target && isPasswordInput(target)) {
+                passwordField = target;
+            }
         } else if (!usernameField && LABEL_USERNAME_PATTERN.test(text)) {
-            usernameField = resolveLabelTarget(label);
+            const target = resolveLabelTarget(label);
+            if (target && isTextLikeInput(target)) {
+                usernameField = target;
+            }
         }
     }
     return present(usernameField, passwordField);
@@ -128,9 +146,9 @@ function byPlaceholder(root: ParentNode): DetectedLoginForm | undefined {
     let passwordField: HTMLInputElement | undefined;
     for (const input of queryAll(root, 'input')) {
         const placeholder = input.placeholder;
-        if (!passwordField && LABEL_PASSWORD_PATTERN.test(placeholder)) {
+        if (!passwordField && isPasswordInput(input) && LABEL_PASSWORD_PATTERN.test(placeholder)) {
             passwordField = input;
-        } else if (!usernameField && LABEL_USERNAME_PATTERN.test(placeholder)) {
+        } else if (!usernameField && isTextLikeInput(input) && LABEL_USERNAME_PATTERN.test(placeholder)) {
             usernameField = input;
         }
     }

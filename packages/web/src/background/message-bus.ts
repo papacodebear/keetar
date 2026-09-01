@@ -55,6 +55,8 @@ export type KeetarRequest =
     | { type: 'SEARCH_ENTRIES'; query: string }
     | { type: 'GET_ENTRY_FIELD'; entryUuid: string; field: EntryFieldName }
     | { type: 'GET_ENTRY_TOTP'; entryUuid: string }
+    | { type: 'SET_ENTRY_TOTP'; entryUuid: string; secretOrUrl: string }
+    | { type: 'REMOVE_ENTRY_TOTP'; entryUuid: string }
     | { type: 'GET_PASSWORD_HEALTH' }
     | { type: 'GET_DUPLICATE_CREDENTIAL_GROUPS' }
     | { type: 'REMOVE_DUPLICATE_ENTRIES'; keepEntryUuids: string[] }
@@ -78,6 +80,7 @@ export type KeetarRequest =
     | { type: 'UPDATE_ENTRY'; entryUuid: string; fields: EntryFields }
     | { type: 'DELETE_ENTRY'; entryUuid: string }
     | { type: 'RETRY_SYNC' }
+    | { type: 'FORCE_RESYNC' }
     | { type: 'GET_GROUP_TREE' }
     | { type: 'APPLY_AI_SORT'; assignments: { entryUuid: string; groupName: string }[] }
     | { type: 'GET_ENTRY_DETAIL'; entryUuid: string }
@@ -143,7 +146,9 @@ export type KeetarResponse =
     | { ok: true; type: 'LIST_ENTRIES'; entries: EntrySummary[] }
     | { ok: true; type: 'SEARCH_ENTRIES'; entries: EntrySummary[] }
     | { ok: true; type: 'GET_ENTRY_FIELD'; value: string }
-    | { ok: true; type: 'GET_ENTRY_TOTP'; code: string; remainingSeconds: number }
+    | { ok: true; type: 'GET_ENTRY_TOTP'; code: string; remainingSeconds: number; period: number }
+    | { ok: true; type: 'SET_ENTRY_TOTP' }
+    | { ok: true; type: 'REMOVE_ENTRY_TOTP' }
     | { ok: true; type: 'GET_PASSWORD_HEALTH'; report: PasswordHealthReport }
     | { ok: true; type: 'GET_DUPLICATE_CREDENTIAL_GROUPS'; groups: DuplicateCredentialGroup[] }
     | { ok: true; type: 'REMOVE_DUPLICATE_ENTRIES'; removed: number }
@@ -160,6 +165,7 @@ export type KeetarResponse =
     | { ok: true; type: 'UPDATE_ENTRY' }
     | { ok: true; type: 'DELETE_ENTRY' }
     | { ok: true; type: 'RETRY_SYNC' }
+    | { ok: true; type: 'FORCE_RESYNC' }
     | { ok: true; type: 'GET_GROUP_TREE'; root: GroupNode; recycleBinGroupUuid: string | undefined }
     | { ok: true; type: 'APPLY_AI_SORT'; groupsCreated: number; entriesMoved: number; skipped: number }
     | { ok: true; type: 'GET_ENTRY_DETAIL'; entry: EntryDetail }

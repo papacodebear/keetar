@@ -195,11 +195,15 @@ export class OpfsCachedProvider implements FileProvider {
         if (!cached) {
             throw new Error('no local copy to keep');
         }
-        // Bypasses cloud's revision guard—user explicitly chose to overwrite the conflict.
-        const meta = isForceWritable(this.cloud)
-            ? await this.cloud.forceWrite(path, cached)
-            : await this.cloud.write(path, cached);
+        await this.forceWrite(path, cached);
+    }
+
+    /** Pushes data to the cloud unconditionally, bypassing the normal revision-conflict guard. */
+    async forceWrite(path: string, data: ArrayBuffer): Promise<FileMetadata> {
+        const meta = isForceWritable(this.cloud) ? await this.cloud.forceWrite(path, data) : await this.cloud.write(path, data);
+        await writeCacheBlob(this.uuid, data);
         await writeCacheMeta(this.uuid, { provider: 'gdrive', filePath: path, ...meta, dirty: false });
+        return meta;
     }
 }
 

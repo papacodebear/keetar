@@ -108,6 +108,7 @@ export interface EntryDetail {
     passkeys: PasskeySummary[];
     /** Set when Username/Password are live KeePass field references to another entry (a "clone"). */
     clonedFromEntryUuid: string | undefined;
+    hasTotp: boolean;
     icon: number;
     hasCustomIcon: boolean;
 }
@@ -279,13 +280,33 @@ class VaultSession {
         return resolveFieldValue(db, fieldText(entry.fields.get('Password'))) === password;
     }
 
-    getEntryTotp(entryUuid: string): Promise<Totp.TotpCode> {
+    async getEntryTotp(entryUuid: string): Promise<Totp.TotpCode & { period: number }> {
         const entry = this.requireEntry(entryUuid);
         const value = fieldText(entry.fields.get('otp')) || fieldText(entry.fields.get('TOTP Seed'));
         if (!value) {
             throw new Error('entry has no TOTP secret');
         }
-        return Totp.generateTotpCode(value);
+        const code = await Totp.generateTotpCode(value);
+        return { ...code, period: Totp.parseTotp(value).period };
+    }
+
+    /** Validates before writing — an unparseable secret/otpauth URL never reaches the vault. */
+    async setEntryTotp(entryUuid: string, secretOrUrl: string): Promise<void> {
+        Totp.parseTotp(secretOrUrl);
+        const entry = this.requireEntry(entryUuid);
+        entry.pushHistory();
+        entry.fields.set('otp', ProtectedValue.fromString(secretOrUrl));
+        entry.times.update();
+        await this.persist();
+    }
+
+    async removeEntryTotp(entryUuid: string): Promise<void> {
+        const entry = this.requireEntry(entryUuid);
+        entry.pushHistory();
+        entry.fields.delete('otp');
+        entry.fields.delete('TOTP Seed');
+        entry.times.update();
+        await this.persist();
     }
 
     async getPasswordHealth(): Promise<PasswordHealthReport> {
@@ -367,6 +388,7 @@ class VaultSession {
             })),
             customFields: customFieldsOf(entry),
             passkeys: this.passkeysOnEntry(entry),
+            hasTotp: Boolean(fieldText(entry.fields.get('otp')) || fieldText(entry.fields.get('TOTP Seed'))),
             icon: entry.icon ?? Consts.Icons.Key,
             hasCustomIcon: entry.customIcon !== undefined
         };
@@ -1105,6 +1127,20 @@ class VaultSession {
         await this.persist();
     }
 
+    /** Force-pushes the current session's vault to its cloud copy, bypassing the usual revision-conflict guard. */
+    async forceResync(): Promise<void> {
+        if (this.state.status !== 'unlocked') {
+            throw new Error('vault is locked');
+        }
+        const { db, provider, path } = this.state;
+        if (!isForceWritable(provider)) {
+            throw new Error('this vault has no cloud counterpart to resync');
+        }
+        db.cleanup({ binaries: true, customIcons: true });
+        const data = await db.save();
+        await provider.forceWrite(path, data);
+    }
+
     // Serialize entire tree; failure surfaces as error on triggering mutation (§14).
     private async persist(): Promise<void> {
         if (this.state.status !== 'unlocked') {
@@ -1141,6 +1177,11 @@ class VaultSession {
         }
         return group;
     }
+}
+
+// Providers with a bypassable in-session conflict guard (local-file.ts has no guard to bypass).
+function isForceWritable(provider: FileProvider): provider is FileProvider & { forceWrite(path: string, data: ArrayBuffer): Promise<unknown> } {
+    return typeof (provider as { forceWrite?: unknown }).forceWrite === 'function';
 }
 
 function fieldText(field: KdbxEntryField | undefined): string {

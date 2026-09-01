@@ -216,9 +216,15 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
                 value: vaultSession.getEntryField(request.entryUuid, request.field)
             };
         case 'GET_ENTRY_TOTP': {
-            const { code, remainingSeconds } = await vaultSession.getEntryTotp(request.entryUuid);
-            return { ok: true, type: 'GET_ENTRY_TOTP', code, remainingSeconds };
+            const { code, remainingSeconds, period } = await vaultSession.getEntryTotp(request.entryUuid);
+            return { ok: true, type: 'GET_ENTRY_TOTP', code, remainingSeconds, period };
         }
+        case 'SET_ENTRY_TOTP':
+            await vaultSession.setEntryTotp(request.entryUuid, request.secretOrUrl);
+            return { ok: true, type: 'SET_ENTRY_TOTP' };
+        case 'REMOVE_ENTRY_TOTP':
+            await vaultSession.removeEntryTotp(request.entryUuid);
+            return { ok: true, type: 'REMOVE_ENTRY_TOTP' };
         case 'GET_PASSWORD_HEALTH':
             return {
                 ok: true,
@@ -349,6 +355,9 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
         case 'RETRY_SYNC':
             await vaultSession.retrySync();
             return { ok: true, type: 'RETRY_SYNC' };
+        case 'FORCE_RESYNC':
+            await vaultSession.forceResync();
+            return { ok: true, type: 'FORCE_RESYNC' };
         case 'GET_GROUP_TREE': {
             const { root, recycleBinGroupUuid } = vaultSession.getGroupTree();
             return { ok: true, type: 'GET_GROUP_TREE', root, recycleBinGroupUuid };

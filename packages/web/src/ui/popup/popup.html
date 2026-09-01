@@ -96,6 +96,24 @@
       .entry-icon { flex-shrink: 0; border-radius: 3px; object-fit: contain; }
       .entry-icon-fallback { display: inline-block; border-radius: 50%; background: rgba(127, 127, 127, 0.3); }
       .empty { color: #666; padding: 0.5rem 0; }
+      .entry-totp-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        padding: 0.3rem 0.5rem;
+        margin: -0.2rem 0 0.3rem;
+        background: rgba(60, 130, 246, 0.06);
+        border-radius: 4px;
+      }
+      .totp-display { display: flex; align-items: center; gap: 0.4rem; }
+      .totp-code-button { display: flex; align-items: center; border: none; background: transparent; padding: 0.15rem 0.3rem; cursor: pointer; border-radius: 4px; }
+      .totp-code-button:hover { background: rgba(127, 127, 127, 0.12); }
+      .totp-code { font-family: monospace; font-size: 1.1em; letter-spacing: 0.05em; font-weight: 600; }
+      .totp-ring-track { fill: none; stroke: rgba(127, 127, 127, 0.25); stroke-width: 2; }
+      .totp-ring-progress { fill: none; stroke: #2563eb; stroke-width: 2; stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
+      .totp-ring.urgent .totp-ring-progress { stroke: #c00; }
+      .totp-copied { color: #2a7a2a; font-size: 0.8em; }
     </style>
   </head>
   <body>

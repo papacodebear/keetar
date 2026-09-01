@@ -26,6 +26,7 @@
     "@keetar/core": "workspace:*",
     "argon2-browser": "^1.18.0",
     "google-picker-offline-loader": "github:papacodebear/google-picker-offline-loader#6d1b66d",
+    "jsqr": "^1.4.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "tldts": "^6.1.0"

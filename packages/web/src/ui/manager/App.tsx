@@ -10,12 +10,15 @@ import { ErrorBox } from '../shared/ErrorBox';
 import { buildAiSortExport, diffAiSortAssignments, parseAiSortResponse } from './ai-sort';
 import { CustomFieldsSection } from './CustomFieldsSection';
 import { PasskeySection } from './PasskeySection';
+import { MfaSection } from './MfaSection';
 import { getSortedEntryUuids, markEntriesSorted } from './ai-sort-tracker';
 import { GoogleDriveProvider } from '../../providers/gdrive';
 import { showDrivePicker } from '../../providers/gdrive-picker';
 import { clearConfiguredVault, getConfiguredVault } from '../../config/vault-config';
 import { getRevealTimeoutSeconds } from '../../config/reveal-config';
-import type { VaultBackend } from '../../config/vault-config';
+import type { ConfiguredVault, VaultBackend } from '../../config/vault-config';
+import { checkVaultSyncStatus } from '../../providers';
+import type { SyncStatus } from '../../providers/opfs-cache';
 import type { AiSortDiff } from './ai-sort';
 import type {
     CombineConflict,
@@ -40,6 +43,27 @@ async function sendMutation(request: KeetarRequest, onSyncError: (error: string 
     return response;
 }
 
+// Proactive "is the cloud copy current" check, independent of the reactive sync-error banner
+// above (which only fires after a mutation's persist actually fails).
+function useCloudSyncStatus(vault: ConfiguredVault | undefined) {
+    const [status, setStatus] = useState<SyncStatus | 'checking'>('checking');
+
+    async function refresh(): Promise<void> {
+        if (!vault) {
+            return;
+        }
+        setStatus('checking');
+        setStatus(await checkVaultSyncStatus(vault));
+    }
+
+    useEffect(() => {
+        void refresh();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [vault?.uuid, vault?.provider, vault?.path]);
+
+    return { status, refresh };
+}
+
 type AppState =
     | { kind: 'loading' }
     | { kind: 'locked' }
@@ -51,6 +75,7 @@ type AppState =
           vaultUuid: string | undefined;
           vaultName: string | undefined;
           vaultProvider: VaultBackend | undefined;
+          vaultPath: string | undefined;
           selectedGroupUuid: string;
           selectedEntryUuid?: string;
       };
@@ -102,6 +127,7 @@ export function App() {
             vaultUuid: configured?.uuid,
             vaultName: configured?.name,
             vaultProvider: configured?.provider,
+            vaultPath: configured?.path,
             selectedGroupUuid,
             selectedEntryUuid: keepSelection?.entryUuid
         });
@@ -129,6 +155,7 @@ export function App() {
             vaultUuid={state.vaultUuid}
             vaultName={state.vaultName}
             vaultProvider={state.vaultProvider}
+            vaultPath={state.vaultPath}
             selectedGroupUuid={state.selectedGroupUuid}
             selectedEntryUuid={state.selectedEntryUuid}
             onReload={reloadTree}
@@ -143,12 +170,42 @@ function RedirectToOptions() {
     return null;
 }
 
+function SyncStatusBadge({ status }: { status: SyncStatus | 'checking' }) {
+    if (status === 'checking') {
+        return (
+            <span className="sync-badge sync-checking-badge" title="Checking Google Drive…">
+                …
+            </span>
+        );
+    }
+    if (status === 'conflict') {
+        return (
+            <span className="sync-badge sync-conflict-badge" title="Sync conflict — changed both here and in Google Drive">
+                ⚠
+            </span>
+        );
+    }
+    if (status === 'cloud-newer') {
+        return (
+            <span className="sync-badge sync-pending-badge" title="A newer copy is waiting in Google Drive">
+                ↓
+            </span>
+        );
+    }
+    return (
+        <span className="sync-badge sync-ok-badge" title="Synced with Google Drive">
+            ✓
+        </span>
+    );
+}
+
 function Ready({
     root,
     recycleBinGroupUuid,
     vaultUuid,
     vaultName,
     vaultProvider,
+    vaultPath,
     selectedGroupUuid,
     selectedEntryUuid,
     onReload
@@ -158,6 +215,7 @@ function Ready({
     vaultUuid: string | undefined;
     vaultName: string | undefined;
     vaultProvider: VaultBackend | undefined;
+    vaultPath: string | undefined;
     selectedGroupUuid: string;
     selectedEntryUuid: string | undefined;
     onReload: (keepSelection?: { groupUuid: string; entryUuid?: string }) => Promise<void>;
@@ -166,6 +224,10 @@ function Ready({
     const selectedGroupIsInRecycleBin = isGroupInRecycleBin(root, selectedGroupUuid, recycleBinGroupUuid);
     const [syncError, setSyncError] = useState<string | undefined>(undefined);
     const [retryingSync, setRetryingSync] = useState(false);
+    const [resyncing, setResyncing] = useState(false);
+    const vault: ConfiguredVault | undefined =
+        vaultUuid && vaultProvider ? { uuid: vaultUuid, name: vaultName ?? '', provider: vaultProvider, path: vaultPath } : undefined;
+    const cloudSync = useCloudSyncStatus(vaultProvider === 'gdrive' ? vault : undefined);
     const [healthReport, setHealthReport] = useState<PasswordHealthReport | undefined>(undefined);
     const [duplicateGroups, setDuplicateGroups] = useState<DuplicateCredentialGroup[] | undefined>(undefined);
     const [healthError, setHealthError] = useState<string | undefined>(undefined);
@@ -387,6 +449,20 @@ function Ready({
         }
     }
 
+    // Pushes the current session's vault to Drive regardless of the badge's last-known status —
+    // bypasses the normal revision-conflict guard, so this is the one-click fix for either state.
+    async function forceResync(): Promise<void> {
+        setResyncing(true);
+        try {
+            const response = await sendMutation({ type: 'FORCE_RESYNC' }, setSyncError);
+            if (response.ok) {
+                await cloudSync.refresh();
+            }
+        } finally {
+            setResyncing(false);
+        }
+    }
+
     return (
         <>
             {syncError && (
@@ -409,6 +485,21 @@ function Ready({
                     <span className="vault-badge-text" title={vaultName}>
                         {vaultName}
                     </span>
+                    {vaultProvider === 'gdrive' && (
+                        <>
+                            <SyncStatusBadge status={cloudSync.status} />
+                            <button
+                                type="button"
+                                className="icon-button"
+                                title="Force-push this vault to Google Drive"
+                                aria-label="Force Resync"
+                                disabled={resyncing}
+                                onClick={() => void forceResync()}
+                            >
+                                ↻
+                            </button>
+                        </>
+                    )}
                     <div className="vault-badge-actions">
                         <button
                             type="button"
@@ -1783,6 +1874,8 @@ function EntryDetailPanel({
             </div>
 
             <PasskeySection entryUuid={entry.uuid} onChanged={() => void load()} />
+
+            <MfaSection entryUuid={entry.uuid} hasTotp={entry.hasTotp} onChanged={() => void load()} />
 
             <p style={{ marginTop: '1rem' }}>
                 {savedFlash && <span className="save-indicator">Saved</span>}

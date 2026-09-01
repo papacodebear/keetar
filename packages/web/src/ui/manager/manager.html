@@ -37,6 +37,11 @@
       .vault-provider-icon { width: 20px; height: 20px; flex-shrink: 0; }
       .vault-badge-text { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
       .vault-badge-actions { display: flex; gap: 0.2rem; flex-shrink: 0; }
+      .sync-badge { font-size: 0.85em; cursor: default; flex-shrink: 0; }
+      .sync-ok-badge { color: #2a7a2a; }
+      .sync-pending-badge { color: #a06a00; }
+      .sync-conflict-badge { color: #c00; }
+      .sync-checking-badge { color: #666; }
       .tree-pane-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; margin-bottom: 0.5rem; }
       .tree-pane-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
       .icon-button { padding: 0.11rem 0.385rem; font-size: 16.5px; line-height: 1; margin-right: 0; }
@@ -139,6 +144,22 @@
       .detail-section { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid rgba(127, 127, 127, 0.25); }
       .detail-section > label { display: block; font-weight: 600; font-size: 0.95em; margin-bottom: 0.5rem; }
       .attachment-row { display: flex; justify-content: space-between; align-items: center; padding: 0.25rem 0; }
+      .totp-display { display: flex; align-items: center; gap: 0.4rem; }
+      .totp-code-button { display: flex; align-items: center; border: none; background: transparent; padding: 0.15rem 0.3rem; cursor: pointer; border-radius: 4px; }
+      .totp-code-button:hover { background: rgba(127, 127, 127, 0.12); }
+      .totp-code { font-family: monospace; font-size: 1.15em; letter-spacing: 0.05em; font-weight: 600; }
+      .totp-ring-track { fill: none; stroke: rgba(127, 127, 127, 0.25); stroke-width: 2; }
+      .totp-ring-progress { fill: none; stroke: #2563eb; stroke-width: 2; stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
+      .totp-ring.urgent .totp-ring-progress { stroke: #c00; }
+      .totp-copied { color: #2a7a2a; font-size: 0.8em; }
+      .mfa-active { display: flex; align-items: center; gap: 0.75rem; }
+      .mfa-add-actions { display: flex; gap: 0.5rem; }
+      .mfa-manual-form { display: flex; flex-direction: column; gap: 0.5rem; max-width: 22rem; }
+      .mfa-manual-actions { display: flex; gap: 0.5rem; }
+      .qr-scanner { display: flex; flex-direction: column; gap: 0.5rem; max-width: 22rem; }
+      .qr-scanner-hint { color: #666; font-size: 0.85em; margin: 0; }
+      .qr-scanner-video { width: 100%; border-radius: 6px; background: #000; }
+      .qr-scanner-error { color: #c00; font-size: 0.85em; margin: 0; }
       button { font-size: 12px; padding: 0.3rem 0.6rem; cursor: pointer; }
       .danger { color: #c00; }
       .empty-state { color: #666; padding: 1rem; }

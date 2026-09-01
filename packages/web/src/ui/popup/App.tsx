@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { ByteUtils } from '@keetar/core';
 import { sendToBackground, type PendingLoginPrompt } from '../../background/message-bus';
 import type { EntryFieldName, EntrySummary } from '../../background/vault-session';
@@ -13,6 +13,7 @@ import { isWebAuthnSupported } from '../../auth/webauthn';
 import { EntryIcon } from '../shared/EntryIcon';
 import { VaultProviderIcon } from '../shared/VaultProviderIcon';
 import { PasswordGeneratorPanel } from '../shared/PasswordGeneratorPanel';
+import { TotpDisplay } from '../shared/TotpDisplay';
 import { tabs } from '../../platform';
 import { ensureVaultFilePermission } from '../../providers/local-file';
 import { openManagerTab } from '../shared/open-manager';
@@ -559,15 +560,6 @@ function UnlockedView({
         }
     }
 
-    async function copyTotp(entryUuid: string): Promise<void> {
-        const response = await sendToBackground({ type: 'GET_ENTRY_TOTP', entryUuid });
-        if (response.ok && response.type === 'GET_ENTRY_TOTP') {
-            await navigator.clipboard.writeText(response.code);
-            void scheduleClipboardClear(response.code);
-            showToast(`${response.code} copied`);
-        }
-    }
-
     async function fillTotp(entryUuid: string): Promise<void> {
         await withHostTrust(async () => {
             const response = await sendToBackground({ type: 'GET_ENTRY_TOTP', entryUuid });
@@ -642,42 +634,42 @@ function UnlockedView({
             {toast && <p className="copy-toast">{toast}</p>}
             <ul className="entry-list">
                 {matchedEntries.map((entry) => (
-                    <li key={entry.uuid} className="entry-row matched">
-                        <EntryIcon entryUuid={entry.uuid} icon={entry.icon} hasCustomIcon={entry.hasCustomIcon} size={18} />
-                        <div className="entry-info">
-                            <div className="entry-title">{entry.title || '(no title)'}</div>
-                            <div className="entry-username">{entry.username}</div>
-                        </div>
-                        <div className="entry-actions">
-                            <button type="button" onClick={() => void fill(entry.uuid)}>
-                                Fill
-                            </button>
-                            <button type="button" onClick={() => void copyField(entry.uuid, 'username', 'Username')}>
-                                User
-                            </button>
-                            <button type="button" onClick={() => void copyField(entry.uuid, 'password', 'Password')}>
-                                Pass
-                            </button>
-                            {entry.hasTotp && (
-                                <>
-                                    <button type="button" onClick={() => void copyTotp(entry.uuid)}>
-                                        OTP
-                                    </button>
-                                    <button type="button" onClick={() => void fillTotp(entry.uuid)}>
-                                        Fill OTP
-                                    </button>
-                                </>
-                            )}
-                            <button
-                                type="button"
-                                title="Open in Manage"
-                                aria-label={`Open ${entry.title || 'entry'} in Manage`}
-                                onClick={() => void openManager(entry.uuid)}
-                            >
-                                …
-                            </button>
-                        </div>
-                    </li>
+                    <Fragment key={entry.uuid}>
+                        <li className="entry-row matched">
+                            <EntryIcon entryUuid={entry.uuid} icon={entry.icon} hasCustomIcon={entry.hasCustomIcon} size={18} />
+                            <div className="entry-info">
+                                <div className="entry-title">{entry.title || '(no title)'}</div>
+                                <div className="entry-username">{entry.username}</div>
+                            </div>
+                            <div className="entry-actions">
+                                <button type="button" onClick={() => void fill(entry.uuid)}>
+                                    Fill
+                                </button>
+                                <button type="button" onClick={() => void copyField(entry.uuid, 'username', 'Username')}>
+                                    User
+                                </button>
+                                <button type="button" onClick={() => void copyField(entry.uuid, 'password', 'Password')}>
+                                    Pass
+                                </button>
+                                <button
+                                    type="button"
+                                    title="Open in Manage"
+                                    aria-label={`Open ${entry.title || 'entry'} in Manage`}
+                                    onClick={() => void openManager(entry.uuid)}
+                                >
+                                    …
+                                </button>
+                            </div>
+                        </li>
+                        {entry.hasTotp && (
+                            <li className="entry-totp-row">
+                                <TotpDisplay entryUuid={entry.uuid} />
+                                <button type="button" onClick={() => void fillTotp(entry.uuid)}>
+                                    Fill OTP
+                                </button>
+                            </li>
+                        )}
+                    </Fragment>
                 ))}
                 {matchedEntries.length === 0 && <li className="empty">No entries match this page.</li>}
             </ul>

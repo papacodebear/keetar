@@ -5,6 +5,8 @@ import type { KeetarRequest, KeetarResponse } from '../../background/message-bus
 import { EntryIcon } from '../shared/EntryIcon';
 import { VaultProviderIcon } from '../shared/VaultProviderIcon';
 import { PasswordGeneratorPanel } from '../shared/PasswordGeneratorPanel';
+import { CopyIcon } from '../shared/CopyIcon';
+import { scheduleClipboardClear } from '../../background/clipboard-clear';
 import { PianoKeysWatermark } from '../shared/PianoKeysWatermark';
 import { ErrorBox } from '../shared/ErrorBox';
 import { buildAiSortExport, diffAiSortAssignments, parseAiSortResponse } from './ai-sort';
@@ -1905,7 +1907,15 @@ function PasswordEditor({
     const [password, setPassword] = useState(initialPassword);
     const [entropy, setEntropy] = useState<number | undefined>(undefined);
     const [showGenerator, setShowGenerator] = useState(false);
+    const [copied, setCopied] = useState(false);
     const generatorRef = useRef<HTMLDivElement>(null);
+
+    async function copyPassword(): Promise<void> {
+        await navigator.clipboard.writeText(password);
+        void scheduleClipboardClear(password);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+    }
 
     useEffect(() => {
         setEntropy(undefined);
@@ -1943,6 +1953,16 @@ function PasswordEditor({
                     onChange={(e) => setPassword(e.target.value)}
                     onBlur={() => void onSave(password)}
                 />
+                <button
+                    type="button"
+                    className="password-copy-button"
+                    title={copied ? 'Copied' : 'Copy'}
+                    aria-label="Copy password"
+                    disabled={!password}
+                    onClick={() => void copyPassword()}
+                >
+                    {copied ? '✓' : <CopyIcon />}
+                </button>
                 <button type="button" onClick={onToggleVisibility}>
                     {showPassword ? 'Hide' : 'Show'}
                 </button>

@@ -16,6 +16,7 @@ import {
     type PendingPasskeyRequest
 } from './message-bus';
 import { startKeepalive } from './keepalive';
+import { startSleepWatchdog } from './sleep-watchdog';
 import { action, idle, sessionStorage, tabs } from '../platform';
 import { matchEntries } from '../autofill/matcher';
 import { hasCompleteCapturedLogin, mergeCapturedLogin, type CapturedLogin } from './login-capture';
@@ -175,6 +176,11 @@ tabs.onRemoved((tabId) => {
 void getAutoLockTimeoutSeconds().then((seconds) => idle.setDetectionInterval(seconds));
 idle.onStateChanged((state) => {
     if ((state === 'idle' || state === 'locked') && vaultSession.status === 'unlocked') {
+        void lockVaultAndNotify();
+    }
+});
+startSleepWatchdog(() => {
+    if (vaultSession.status === 'unlocked') {
         void lockVaultAndNotify();
     }
 });

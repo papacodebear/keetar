@@ -9,7 +9,46 @@ permissions:
   contents: write
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Weekly cron shouldn't publish a redundant beta when nothing's landed since the last one;
+      # a manual run always builds regardless, since that's presumably the point of triggering it.
+      - name: Determine whether a build is needed
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manually triggered — building regardless of changes."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          HEAD_SHA=$(git rev-parse HEAD)
+          LATEST_TAG=$(gh release list --limit 50 --json tagName,isPrerelease,createdAt \
+            --jq '[.[] | select(.isPrerelease) | select(.tagName | startswith("beta-"))] | sort_by(.createdAt) | last | .tagName')
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No previous beta release found — building."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          LATEST_SHA=$(gh api "repos/${{ github.repository }}/commits/$LATEST_TAG" --jq .sha)
+          if [ "$HEAD_SHA" = "$LATEST_SHA" ]; then
+            echo "HEAD ($HEAD_SHA) matches the last beta release ($LATEST_TAG) — nothing changed, skipping."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "HEAD ($HEAD_SHA) differs from last beta release ($LATEST_TAG at $LATEST_SHA) — building."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
   beta:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository

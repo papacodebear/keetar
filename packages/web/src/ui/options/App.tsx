@@ -402,6 +402,12 @@ function DatabaseSection({
         void openManagerTab();
     }
 
+    // Unlocking here means the user is already looking at this tab for it — navigate straight
+    // there instead of opening/focusing a separate Manager tab and leaving this one behind.
+    function goToManager(): void {
+        window.location.replace(chrome.runtime.getURL('manager/manager.html'));
+    }
+
     // Pick new backing file or recover missing Drive file (reconnect inline if needed).
     async function pickNewFile(): Promise<void> {
         setPickBusy(true);
@@ -498,7 +504,7 @@ function DatabaseSection({
                 </div>
             )}
             {lockState.status === 'locked' && (
-                <UnlockForm vault={vault} enrolled={enrolled} lockState={lockState} onUnlocked={openManager} />
+                <UnlockForm vault={vault} enrolled={enrolled} lockState={lockState} onUnlocked={goToManager} />
             )}
         </>
     );

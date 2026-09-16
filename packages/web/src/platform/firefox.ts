@@ -20,6 +20,12 @@ declare const browser: {
             addListener(callback: (state: 'active' | 'idle' | 'locked') => void): void;
         };
     };
+    alarms: {
+        create(name: string, alarmInfo: chrome.alarms.AlarmCreateInfo): void;
+        onAlarm: {
+            addListener(callback: (alarm: chrome.alarms.Alarm) => void): void;
+        };
+    };
     identity: {
         getRedirectURL(path?: string): string;
         launchWebAuthFlow(details: { url: string; interactive?: boolean }): Promise<string>;
@@ -81,13 +87,14 @@ export const idle = {
     }
 };
 
-// No-op: Firefox MV2 has persistent background (no service worker to keep alive; §9.3).
+// Real (not stubbed): the persistent background page still freezes during OS sleep, so
+// sleep-watchdog.ts needs a genuine alarm here even though keepalive.ts doesn't (Chrome-only).
 export const alarms = {
-    create(_name: string, _alarmInfo: chrome.alarms.AlarmCreateInfo): void {
-        // intentionally no-op
+    create(name: string, alarmInfo: chrome.alarms.AlarmCreateInfo): void {
+        browser.alarms.create(name, alarmInfo);
     },
-    onAlarm(_callback: (alarm: chrome.alarms.Alarm) => void): void {
-        // intentionally no-op
+    onAlarm(callback: (alarm: chrome.alarms.Alarm) => void): void {
+        browser.alarms.onAlarm.addListener(callback);
     }
 };
 

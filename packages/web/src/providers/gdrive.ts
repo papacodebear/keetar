@@ -37,6 +37,14 @@ export class DriveFileNotFoundError extends Error {
     }
 }
 
+// No token, or silent reauth failed (no live Google session to reuse) — needs an interactive reconnect.
+export class DriveAuthError extends Error {
+    constructor() {
+        super('Google Drive needs you to sign in again before it can sync. Reconnect Google Drive to continue.');
+        this.name = 'DriveAuthError';
+    }
+}
+
 export async function connectGoogleDrive(): Promise<void> {
     const token = await authorizeImplicit(true);
     await saveTokens(PROVIDER_KEY, { accessToken: token.accessToken, refreshToken: undefined, expiresAt: token.expiresAt });
@@ -231,16 +239,21 @@ export async function getAccessToken(cached?: string, forceRefresh = false): Pro
 
     const stored = await loadTokens(PROVIDER_KEY);
     if (!stored) {
-        throw new Error('Google Drive is not connected');
+        throw new DriveAuthError();
     }
     const EXPIRY_MARGIN_MS = 60_000;
     if (!forceRefresh && Date.now() < stored.expiresAt - EXPIRY_MARGIN_MS) {
         return stored.accessToken;
     }
     // Token expired—rerun implicit flow silently (no refresh token); works if user still signed into Google.
-    const refreshed = await authorizeImplicit(false);
-    await saveTokens(PROVIDER_KEY, { accessToken: refreshed.accessToken, refreshToken: undefined, expiresAt: refreshed.expiresAt });
-    return refreshed.accessToken;
+    try {
+        const refreshed = await authorizeImplicit(false);
+        await saveTokens(PROVIDER_KEY, { accessToken: refreshed.accessToken, refreshToken: undefined, expiresAt: refreshed.expiresAt });
+        return refreshed.accessToken;
+    } catch {
+        // Distinct type so callers offer a reconnect instead of retrying the same silent flow forever.
+        throw new DriveAuthError();
+    }
 }
 
 function toFileMetadata(fields: DriveFileFields): FileMetadata {

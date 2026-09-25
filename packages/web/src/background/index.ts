@@ -481,6 +481,10 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
         }
         case 'EXPORT_VAULT':
             return { ok: true, type: 'EXPORT_VAULT', data: vaultSession.exportVault(request.format) };
+        case 'EXPORT_VAULT_KDBX': {
+            const data = await vaultSession.exportVaultKdbx();
+            return { ok: true, type: 'EXPORT_VAULT_KDBX', dataBase64: ByteUtils.bytesToBase64(new Uint8Array(data)) };
+        }
         case 'OPEN_SECONDARY_VAULT': {
             const data = ByteUtils.arrayToBuffer(ByteUtils.base64ToBytes(request.dataBase64));
             const summary = await vaultSession.openSecondaryVault(data, request.password);

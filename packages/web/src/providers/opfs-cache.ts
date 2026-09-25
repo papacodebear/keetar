@@ -1,6 +1,6 @@
 import { ByteUtils } from '@keetar/core';
 import type { FileListing, FileMetadata, FileProvider } from '@keetar/core';
-import { CloudConflictError } from './gdrive';
+import { CloudConflictError, DriveAuthError } from './gdrive';
 import { getKvStore } from '../storage/opfs-kv-store';
 
 // §4.3's sync algorithm with a local cache + metadata; enables offline access and cross-session conflict detection.
@@ -57,7 +57,7 @@ export class SyncConflictError extends Error {
     }
 }
 
-export type SyncStatus = 'ok' | 'cloud-newer' | 'conflict';
+export type SyncStatus = 'ok' | 'cloud-newer' | 'conflict' | 'unsynced';
 
 export class OpfsCachedProvider implements FileProvider {
     constructor(
@@ -125,7 +125,9 @@ export class OpfsCachedProvider implements FileProvider {
             await writeCacheMeta(this.uuid, { provider: 'gdrive', filePath: path, ...meta, dirty: false });
             return meta;
         } catch (e) {
-            if (e instanceof CloudConflictError) {
+            // Auth failures must not fall into the silent "sync later" path below — retrying or
+            // force-pushing later would just fail the same way until the user reconnects.
+            if (e instanceof CloudConflictError || e instanceof DriveAuthError) {
                 throw e;
             }
             await writeCacheBlob(this.uuid, data);
@@ -178,6 +180,11 @@ export class OpfsCachedProvider implements FileProvider {
         const cloudChanged = cloudMeta.eTag !== cachedMeta.eTag;
         if (cachedMeta.dirty && cloudChanged) {
             return 'conflict';
+        }
+        // Dirty but cloud unchanged means a write never actually landed (e.g. it silently fell
+        // back to local-only above) — reporting 'ok' here would hide that from the user entirely.
+        if (cachedMeta.dirty) {
+            return 'unsynced';
         }
         return cloudChanged ? 'cloud-newer' : 'ok';
     }

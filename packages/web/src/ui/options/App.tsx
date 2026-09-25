@@ -18,7 +18,7 @@ import {
     unlockToPasswordHash
 } from '../../auth/biometric';
 import { isWebAuthnSupported } from '../../auth/webauthn';
-import { ensureGoogleDriveAuthorized, GoogleDriveProvider, isGoogleDriveConnected } from '../../providers/gdrive';
+import { connectGoogleDrive, ensureGoogleDriveAuthorized, GoogleDriveProvider, isGoogleDriveConnected } from '../../providers/gdrive';
 import { showDrivePicker } from '../../providers/gdrive-picker';
 import { checkVaultSyncStatus, resolveVaultSyncConflict } from '../../providers';
 import type { SyncStatus } from '../../providers/opfs-cache';
@@ -503,6 +503,15 @@ function DatabaseSection({
                     {sync.message && <ErrorBox message={sync.message} />}
                 </div>
             )}
+            {vault.provider === 'gdrive' && sync.status === 'unsynced' && (
+                <div className="sync-conflict">
+                    <p className="hint">Changes made here haven't reached Google Drive yet. This is usually a stale sign-in.</p>
+                    <button type="button" onClick={() => void sync.reconnect()} disabled={sync.busy}>
+                        {sync.busy ? 'Reconnecting…' : 'Reconnect Google Drive'}
+                    </button>
+                    {sync.message && <ErrorBox message={sync.message} />}
+                </div>
+            )}
             {lockState.status === 'locked' && (
                 <UnlockForm vault={vault} enrolled={enrolled} lockState={lockState} onUnlocked={goToManager} />
             )}
@@ -724,8 +733,25 @@ function useVaultSyncStatus(vault: ConfiguredVault, onChanged: () => Promise<voi
         try {
             setStatus(await checkVaultSyncStatus(vault));
         } catch (e) {
+            // Was: setStatus('ok') — hid the failure behind a green checkmark, since sync.message
+            // below only ever rendered under the 'conflict' branch. 'unsynced' surfaces it instead.
             setMessage(e instanceof Error ? e.message : String(e));
-            setStatus('ok');
+            setStatus('unsynced');
+        }
+    }
+
+    // Interactive OAuth — recovers a Drive session the silent reauth in write()/read() already
+    // gave up on.
+    async function reconnect(): Promise<void> {
+        setBusy(true);
+        setMessage(undefined);
+        try {
+            await connectGoogleDrive();
+            await check();
+        } catch (e) {
+            setMessage(e instanceof Error ? e.message : String(e));
+        } finally {
+            setBusy(false);
         }
     }
 
@@ -744,7 +770,7 @@ function useVaultSyncStatus(vault: ConfiguredVault, onChanged: () => Promise<voi
         }
     }
 
-    return { status, busy, message, resolve };
+    return { status, busy, message, resolve, reconnect };
 }
 
 function SyncBadge({ status }: { status: SyncStatus | 'checking' }) {
@@ -762,6 +788,13 @@ function SyncBadge({ status }: { status: SyncStatus | 'checking' }) {
         return (
             <span className="sync-badge sync-pending-badge" title="A newer copy is waiting in Google Drive — the next unlock will fetch it">
                 ↓
+            </span>
+        );
+    }
+    if (status === 'unsynced') {
+        return (
+            <span className="sync-badge sync-pending-badge" title="Local changes haven't reached Google Drive yet — open the vault and try Force Resync or Reconnect Google Drive">
+                ↑
             </span>
         );
     }

@@ -14,7 +14,7 @@ import { CustomFieldsSection } from './CustomFieldsSection';
 import { PasskeySection } from './PasskeySection';
 import { MfaSection } from './MfaSection';
 import { getSortedEntryUuids, markEntriesSorted } from './ai-sort-tracker';
-import { GoogleDriveProvider } from '../../providers/gdrive';
+import { connectGoogleDrive, GoogleDriveProvider } from '../../providers/gdrive';
 import { showDrivePicker } from '../../providers/gdrive-picker';
 import { clearConfiguredVault, getConfiguredVault } from '../../config/vault-config';
 import { getRevealTimeoutSeconds } from '../../config/reveal-config';
@@ -55,7 +55,13 @@ function useCloudSyncStatus(vault: ConfiguredVault | undefined) {
             return;
         }
         setStatus('checking');
-        setStatus(await checkVaultSyncStatus(vault));
+        try {
+            setStatus(await checkVaultSyncStatus(vault));
+        } catch {
+            // Couldn't reach Drive to even check (often the same auth failure write() hits) —
+            // 'unsynced' nudges toward Reconnect/Force Resync rather than getting stuck on "checking…".
+            setStatus('unsynced');
+        }
     }
 
     useEffect(() => {
@@ -194,6 +200,16 @@ function SyncStatusBadge({ status }: { status: SyncStatus | 'checking' }) {
             </span>
         );
     }
+    if (status === 'unsynced') {
+        return (
+            <span
+                className="sync-badge sync-pending-badge"
+                title="Local changes haven't reached Google Drive yet — try Force Resync, or Reconnect Google Drive if that keeps failing"
+            >
+                ↑
+            </span>
+        );
+    }
     return (
         <span className="sync-badge sync-ok-badge" title="Synced with Google Drive">
             ✓
@@ -227,6 +243,7 @@ function Ready({
     const [syncError, setSyncError] = useState<string | undefined>(undefined);
     const [retryingSync, setRetryingSync] = useState(false);
     const [resyncing, setResyncing] = useState(false);
+    const [reconnectingDrive, setReconnectingDrive] = useState(false);
     const vault: ConfiguredVault | undefined =
         vaultUuid && vaultProvider ? { uuid: vaultUuid, name: vaultName ?? '', provider: vaultProvider, path: vaultPath } : undefined;
     const cloudSync = useCloudSyncStatus(vaultProvider === 'gdrive' ? vault : undefined);
@@ -451,6 +468,21 @@ function Ready({
         }
     }
 
+    // Interactive OAuth (a real user gesture, unlike the silent reauth write()/read() already
+    // tried and failed) — the only thing that can recover from a Drive session that's gone stale.
+    async function reconnectDrive(): Promise<void> {
+        setReconnectingDrive(true);
+        try {
+            await connectGoogleDrive();
+            await retrySync();
+            await cloudSync.refresh();
+        } catch (e) {
+            setSyncError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setReconnectingDrive(false);
+        }
+    }
+
     // Pushes the current session's vault to Drive regardless of the badge's last-known status —
     // bypasses the normal revision-conflict guard, so this is the one-click fix for either state.
     async function forceResync(): Promise<void> {
@@ -474,6 +506,16 @@ function Ready({
                         <button type="button" disabled={retryingSync} onClick={() => void retrySync()}>
                             {retryingSync ? 'Retrying…' : 'Retry Sync'}
                         </button>
+                        {vaultProvider === 'gdrive' && (
+                            <button
+                                type="button"
+                                disabled={reconnectingDrive}
+                                title="Retry Sync failing repeatedly usually means Drive access expired — this opens Google's sign-in again"
+                                onClick={() => void reconnectDrive()}
+                            >
+                                {reconnectingDrive ? 'Reconnecting…' : 'Reconnect Google Drive'}
+                            </button>
+                        )}
                         <button type="button" disabled={retryingSync} onClick={() => setSyncError(undefined)}>
                             Dismiss
                         </button>
@@ -1128,6 +1170,25 @@ function ImportExportPanel({
         URL.revokeObjectURL(url);
     }
 
+    // Manual backup: the same encrypted .kdbx bytes normally written to the configured provider,
+    // downloaded locally instead — an escape hatch for when resync isn't working.
+    async function handleExportKdbx(): Promise<void> {
+        setStatus(undefined);
+        const response = await sendToBackground({ type: 'EXPORT_VAULT_KDBX' });
+        if (!response.ok || response.type !== 'EXPORT_VAULT_KDBX') {
+            setStatus(`Download failed: ${!response.ok ? response.error : 'unknown error'}`);
+            return;
+        }
+        const bytes = ByteUtils.base64ToBytes(response.dataBase64);
+        const blob = new Blob([bytes], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `keetar-backup-${new Date().toISOString().slice(0, 10)}.kdbx`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
     return (
         <div>
             <div className="middle-pane-header">
@@ -1170,6 +1231,12 @@ function ImportExportPanel({
                 Export as XML
             </button>
 
+            <h4 style={{ marginTop: '1.5rem' }}>Backup</h4>
+            <p>Downloads a full copy of this database as a new, still-encrypted .kdbx file — a manual backup for when sync isn't working.</p>
+            <button type="button" onClick={() => void handleExportKdbx()}>
+                Download Database (.kdbx)
+            </button>
+
             {status && <p style={{ marginTop: '1rem' }}>{status}</p>}
         </div>
     );
@@ -1188,6 +1255,12 @@ type CombineStep =
 
 function describeConflictSide(entries: CombineConflict['primary']): string {
     return entries.map((e) => `${e.title || '(no title)'} (${e.username})`).join(', ');
+}
+
+// UUID matches are the same entry on both sides (certain); everything else is a username+site guess.
+function describeConflictReason(conflict: CombineConflict): string {
+    const basis = conflict.origin === 'uuid' ? 'The same entry was edited in both vaults' : 'Matched by username + site';
+    return conflict.differingFields.length > 0 ? `${basis} — ${conflict.differingFields.join(', ')} differ.` : `${basis}.`;
 }
 
 // Merge second .kdbx into current vault; conflicts resolved by username+domain heuristic (§9).
@@ -1365,14 +1438,15 @@ function CombineVaultsPanel({
                 <>
                     <p>
                         {step.identicalCount > 0 &&
-                            `${step.identicalCount} identical ${step.identicalCount === 1 ? 'entry' : 'entries'} (same username, site, and password) will be left as-is. `}
+                            `${step.identicalCount} identical ${step.identicalCount === 1 ? 'entry matches' : 'entries match'} exactly and will be left as-is. `}
                         {step.conflicts.length === 0
                             ? 'No other overlapping entries found.'
-                            : `${step.conflicts.length} ${step.conflicts.length === 1 ? 'entry needs' : 'entries need'} a decision — same username + site, but the password differs.`}{' '}
+                            : `${step.conflicts.length} ${step.conflicts.length === 1 ? 'entry needs' : 'entries need'} a decision.`}{' '}
                         {step.nonConflictingCount} other {step.nonConflictingCount === 1 ? 'entry' : 'entries'} will import automatically.
                     </p>
                     {step.conflicts.map((conflict) => (
                         <div key={conflict.key} className="field">
+                            <div className="hint">{describeConflictReason(conflict)}</div>
                             <div>
                                 <strong>Existing:</strong> {describeConflictSide(conflict.primary)}
                             </div>

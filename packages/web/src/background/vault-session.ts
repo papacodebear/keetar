@@ -36,14 +36,25 @@ import { buildFieldReference, parseFieldReference } from './field-reference';
 import { applyCloneAwareness, type CloneAwareEntry } from './clone-aware-health';
 import { isRpIdValidForOrigin, matchEntriesForRpId } from './passkey-web';
 import {
+    entryFieldDiff,
+    entryFieldsAsText,
+    fieldText,
+    mergeCustomFields,
+    mergeKeepassxcPasskeyFields,
+    mergeNativePasskeyIndex,
+    passkeysOnEntry
+} from './entry-merge';
+import {
     findExactDuplicateGroups,
     findExactDuplicateMatches,
     findDuplicateGroups,
+    findUuidMatches,
+    uuidMatchesToGroups,
     entriesToRemoveFromDuplicateGroups,
     findNonConflicting,
     mergeIcon,
     mergeStringField,
-    partitionByPasswordMatch
+    partitionByIdenticalMatch
 } from './dedup';
 import type { DedupGroup, IdentifiedRecord } from './dedup';
 
@@ -138,6 +149,10 @@ export interface CombineConflict {
     key: string;
     primary: CombineConflictEntry[];
     secondary: CombineConflictEntry[];
+    /** 'uuid' = confirmed the same entry edited on both sides; 'heuristic' = matched by username+site, may be a false positive. */
+    origin: 'uuid' | 'heuristic';
+    /** Which fields actually differ for a clean 1:1 pair — values are never included, only field names. Empty for ambiguous (non-1:1) groups. */
+    differingFields: string[];
 }
 
 export interface DuplicateCredentialEntry {
@@ -387,7 +402,7 @@ class VaultSession {
                 size: resolveBinary(value).byteLength
             })),
             customFields: customFieldsOf(entry),
-            passkeys: this.passkeysOnEntry(entry),
+            passkeys: passkeysOnEntry(entry),
             hasTotp: Boolean(fieldText(entry.fields.get('otp')) || fieldText(entry.fields.get('TOTP Seed'))),
             icon: entry.icon ?? Consts.Icons.Key,
             hasCustomIcon: entry.customIcon !== undefined
@@ -628,21 +643,7 @@ class VaultSession {
     // entryUuid-keyed, for the entry-detail UI. Merges both backends into one list — the UI never
     // branches on where a passkey came from.
     listPasskeysForEntry(entryUuid: string): PasskeySummary[] {
-        return this.passkeysOnEntry(this.requireEntry(entryUuid));
-    }
-
-    private passkeysOnEntry(entry: KdbxEntry): PasskeySummary[] {
-        const results: PasskeySummary[] = [];
-        for (const item of NativePasskeyStorage.parsePasskeyIndex(
-            fieldText(entry.fields.get(NativePasskeyStorage.PASSKEY_INDEX_FIELD))
-        )) {
-            results.push({ credentialId: item.credentialId, rpId: item.rpId });
-        }
-        const keepassxcRecord = KeepassxcPasskeyStorage.readKeepassxcRecord(entryFieldsAsText(entry));
-        if (keepassxcRecord) {
-            results.push({ credentialId: WebauthnCrypto.base64UrlEncode(keepassxcRecord.credentialId), rpId: keepassxcRecord.rpId });
-        }
-        return results;
+        return passkeysOnEntry(this.requireEntry(entryUuid));
     }
 
     // Tries the native backend first (attachment + index entry), then the KeePassXC one (its fields) —
@@ -914,6 +915,13 @@ class VaultSession {
         return format === 'csv' ? exportToCsv(records) : exportToXml(records);
     }
 
+    /** Manual "download the database" backup: the same encrypted KDBX bytes persist() would write, without touching the configured provider. */
+    async exportVaultKdbx(): Promise<ArrayBuffer> {
+        const db = this.requireUnlocked();
+        db.cleanup({ binaries: true, customIcons: true });
+        return db.save();
+    }
+
     // Combine vaults: open secondary vault for merging (uses heuristic dedup, not object identity).
     async openSecondaryVault(data: ArrayBuffer, password: string): Promise<VaultSummary> {
         const credentials = new KdbxCredentials(ProtectedValue.fromString(password));
@@ -928,26 +936,46 @@ class VaultSession {
         this.pendingCombine = undefined;
     }
 
-    // Compute conflict groups; exact credentials are never re-imported, even when their group paths differ.
+    // Shared UUIDs (certain) are matched before the username+site heuristic (a guess); exact
+    // credentials are never re-imported, even when their group paths differ.
     previewCombine(): { conflicts: CombineConflict[]; nonConflictingCount: number; identicalCount: number } {
         const db = this.requireUnlocked();
-        if (!this.secondaryDb) {
+        const secondaryDb = this.secondaryDb;
+        if (!secondaryDb) {
             throw new Error('no secondary vault open');
         }
         const primaryRecords = kdbxToRecords(db);
-        const secondaryRecords = kdbxToRecords(this.secondaryDb);
-        const exactMatches = findExactDuplicateMatches(primaryRecords, secondaryRecords);
+        const secondaryRecords = kdbxToRecords(secondaryDb);
+
+        const uuidMatches = findUuidMatches(primaryRecords, secondaryRecords);
+        const uuidSecondaryUuids = new Set(uuidMatches.map((match) => match.secondary.uuid));
+        const remainingSecondary = secondaryRecords.filter((record) => !uuidSecondaryUuids.has(record.uuid));
+
+        const exactMatches = findExactDuplicateMatches(primaryRecords, remainingSecondary);
         const exactSecondaryUuids = new Set(exactMatches.map((match) => match.secondary.uuid));
-        const candidateSecondaryRecords = secondaryRecords.filter((record) => !exactSecondaryUuids.has(record.uuid));
-        const allGroups = findDuplicateGroups(primaryRecords, candidateSecondaryRecords);
-        const { identical, divergent } = partitionByPasswordMatch(allGroups);
-        const nonConflicting = findNonConflicting(candidateSecondaryRecords, allGroups);
+        const candidateSecondaryRecords = remainingSecondary.filter((record) => !exactSecondaryUuids.has(record.uuid));
+
+        const heuristicGroups = findDuplicateGroups(primaryRecords, candidateSecondaryRecords);
+        const allGroups = [...uuidMatchesToGroups(uuidMatches), ...heuristicGroups];
+
+        // Full-field diff on the live entries — every field on either side, not a fixed subset —
+        // so nothing (custom fields, passkeys, anything future) is ever invisible to this decision.
+        const diff = (primary: IdentifiedRecord, secondary: IdentifiedRecord): string[] => {
+            const primaryEntry = findEntry(db.getDefaultGroup(), primary.uuid);
+            const secondaryEntry = findEntry(secondaryDb.getDefaultGroup(), secondary.uuid);
+            return primaryEntry && secondaryEntry ? entryFieldDiff(primaryEntry, secondaryEntry) : ['(unresolvable)'];
+        };
+
+        const { identical, divergent } = partitionByIdenticalMatch(allGroups, diff);
+        const nonConflicting = findNonConflicting(candidateSecondaryRecords, heuristicGroups);
         this.pendingCombine = { exactMatches, identicalGroups: identical, divergentGroups: divergent, nonConflicting };
         return {
             conflicts: divergent.map((group) => ({
                 key: group.key,
                 primary: group.primary.map(toConflictEntry),
-                secondary: group.secondary.map(toConflictEntry)
+                secondary: group.secondary.map(toConflictEntry),
+                origin: group.origin,
+                differingFields: group.primary.length === 1 && group.secondary.length === 1 ? diff(group.primary[0], group.secondary[0]) : []
             })),
             nonConflictingCount: nonConflicting.length,
             identicalCount: exactMatches.length + identical.length
@@ -1184,21 +1212,6 @@ function isForceWritable(provider: FileProvider): provider is FileProvider & { f
     return typeof (provider as { forceWrite?: unknown }).forceWrite === 'function';
 }
 
-function fieldText(field: KdbxEntryField | undefined): string {
-    if (field === undefined) {
-        return '';
-    }
-    return typeof field === 'string' ? field : field.getText();
-}
-
-function entryFieldsAsText(entry: KdbxEntry): Map<string, string> {
-    const result = new Map<string, string>();
-    for (const [name, value] of entry.fields) {
-        result.set(name, fieldText(value));
-    }
-    return result;
-}
-
 function uuidHexOf(entry: KdbxEntry): string {
     return ByteUtils.bytesToHex(entry.uuid.bytes).toUpperCase();
 }
@@ -1324,6 +1337,9 @@ async function createEntryFromRecord(
     if (sourceEntry) {
         // Fresh entry: no collision concerns, copy all attachments.
         await copyAttachments(db, entry, sourceEntry, true);
+        mergeNativePasskeyIndex(entry, sourceEntry);
+        mergeKeepassxcPasskeyFields(entry, sourceEntry, true);
+        mergeCustomFields(entry, sourceEntry, true);
     }
     return entry;
 }
@@ -1356,6 +1372,9 @@ async function mergeRecordIntoEntry(
     }
     entry.icon = mergeIcon(entry.icon, record.icon, preferSecondary);
     await copyAttachments(db, entry, sourceEntry, preferSecondary);
+    mergeNativePasskeyIndex(entry, sourceEntry);
+    mergeKeepassxcPasskeyFields(entry, sourceEntry, preferSecondary);
+    mergeCustomFields(entry, sourceEntry, preferSecondary);
     entry.times.update();
 }
 

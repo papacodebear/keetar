@@ -130,6 +130,9 @@ export type KeetarRequest =
           groupUuid: string;
       }
     | { type: 'EXPORT_VAULT'; format: 'csv' | 'xml' }
+    // Full encrypted backup — a manual "download the database" escape hatch, independent of the
+    // configured provider, for when resync is unavailable (§ QOL: manual KDBX export).
+    | { type: 'EXPORT_VAULT_KDBX' }
     // Combine vaults: dataBase64 + plaintext password (one-shot, not stored).
     | { type: 'OPEN_SECONDARY_VAULT'; dataBase64: string; password: string }
     | { type: 'CLOSE_SECONDARY_VAULT' }
@@ -211,6 +214,7 @@ export type KeetarResponse =
     | { ok: true; type: 'FETCH_MISSING_FAVICONS'; updated: number; failed: number; skipped: number }
     | { ok: true; type: 'IMPORT_ENTRIES'; imported: number }
     | { ok: true; type: 'EXPORT_VAULT'; data: string }
+    | { ok: true; type: 'EXPORT_VAULT_KDBX'; dataBase64: string }
     | { ok: true; type: 'OPEN_SECONDARY_VAULT'; summary: VaultSummary }
     | { ok: true; type: 'CLOSE_SECONDARY_VAULT' }
     | {

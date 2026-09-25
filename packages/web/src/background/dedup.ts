@@ -9,6 +9,8 @@ export interface DedupGroup {
     key: string;
     primary: IdentifiedRecord[];
     secondary: IdentifiedRecord[];
+    /** 'uuid' = same entry on both sides (certain); 'heuristic' = matched by username+site (a guess). */
+    origin: 'uuid' | 'heuristic';
 }
 
 /** Entries with the same login credentials, regardless of where they are filed. */
@@ -16,15 +18,7 @@ export interface ExactDuplicateGroup {
     entries: IdentifiedRecord[];
 }
 
-/**
- * Produces a stable identity for an in-vault credential duplicate.
- *
- * Username comparison is case-insensitive, while passwords remain exact. URLs
- * are reduced to their host, so harmless presentation differences (scheme,
- * `www.`, port, path, query string, and fragment) do not hide a duplicate.
- * Different hosts remain distinct. Sparse entries without a complete
- * username-and-host identity fall back to their normalized title and password.
- */
+// Stable identity for an in-vault credential duplicate: username (case-insensitive) + password + host.
 function duplicateCredentialKey(record: VaultEntryRecord): string | undefined {
     const username = record.username.trim().toLowerCase();
     const password = record.password;
@@ -86,11 +80,7 @@ export function findExactDuplicateGroups(records: IdentifiedRecord[]): ExactDupl
         .map((entries) => ({ entries }));
 }
 
-/**
- * Returns the entries to move to the recycle bin after the user reviews each
- * duplicate group. Multiple entries may be retained, but every group must
- * retain at least one entry.
- */
+/** Entries to move to the recycle bin after review; every group must retain at least one entry. */
 export function entriesToRemoveFromDuplicateGroups(
     groups: ExactDuplicateGroup[],
     keepEntryUuids: Iterable<string>
@@ -129,16 +119,18 @@ export function findExactDuplicateMatches(
     return matches;
 }
 
+// Registrable domain (eTLD+1, e.g. "example.co.uk"), not domainWithoutSuffix — the latter drops
+// the public suffix entirely, so example.com and example.org previously matched as "the same site".
 export function matchKey(record: VaultEntryRecord): string | undefined {
     const username = record.username.trim().toLowerCase();
     if (!username) {
         return undefined;
     }
-    const domainLabel = record.url ? parseHostname(record.url).domainWithoutSuffix : null;
-    if (!domainLabel) {
+    const domain = record.url ? parseHostname(record.url).domain : null;
+    if (!domain) {
         return undefined;
     }
-    return `${username}|${domainLabel.toLowerCase()}`;
+    return `${username}|${domain.toLowerCase()}`;
 }
 
 /** Groups records from two vaults by matching key; only keys on both sides returned. */
@@ -155,7 +147,7 @@ export function findDuplicateGroups(
         }
         let group = byKey.get(key);
         if (!group) {
-            group = { key, primary: [], secondary: [] };
+            group = { key, primary: [], secondary: [], origin: 'heuristic' };
             byKey.set(key, group);
         }
         group[side].push(record);
@@ -171,6 +163,34 @@ export function findDuplicateGroups(
     return Array.from(byKey.values()).filter((group) => group.primary.length > 0 && group.secondary.length > 0);
 }
 
+export interface UuidMatch {
+    primary: IdentifiedRecord;
+    secondary: IdentifiedRecord;
+}
+
+/** Same entry UUID on both sides — shared lineage, not a guess from title/username/URL. */
+export function findUuidMatches(primary: IdentifiedRecord[], secondary: IdentifiedRecord[]): UuidMatch[] {
+    const primaryByUuid = new Map(primary.map((record) => [record.uuid, record]));
+    const matches: UuidMatch[] = [];
+    for (const record of secondary) {
+        const match = primaryByUuid.get(record.uuid);
+        if (match) {
+            matches.push({ primary: match, secondary: record });
+        }
+    }
+    return matches;
+}
+
+/** UUID matches, wrapped as 1:1 DedupGroups so they flow through the same identical/divergent partitioning as heuristic groups. */
+export function uuidMatchesToGroups(matches: UuidMatch[]): DedupGroup[] {
+    return matches.map((match) => ({
+        key: `uuid:${match.primary.uuid}`,
+        primary: [match.primary],
+        secondary: [match.secondary],
+        origin: 'uuid'
+    }));
+}
+
 /** Secondary-vault records that aren't part of any conflict — safe to import without asking. */
 export function findNonConflicting(
     secondary: IdentifiedRecord[],
@@ -180,24 +200,27 @@ export function findNonConflicting(
     return secondary.filter((record) => !conflictingUuids.has(record.uuid));
 }
 
-/** True for clean 1:1 pairs with identical passwords (genuinely unchanged entries). */
-export function isIdenticalMatch(group: DedupGroup): boolean {
-    return (
-        group.primary.length === 1 &&
-        group.secondary.length === 1 &&
-        group.primary[0].password === group.secondary[0].password
-    );
+// This file only has the flattened VaultEntryRecord shape, not live KdbxEntry fields/passkeys —
+// the real full-field diff is supplied by the caller (vault-session.ts).
+export type RecordFieldDiff = (primary: IdentifiedRecord, secondary: IdentifiedRecord) => string[];
+
+/** True for clean 1:1 pairs with no differences reported by `diff` — nothing to reconcile. */
+export function isIdenticalMatch(group: DedupGroup, diff: RecordFieldDiff): boolean {
+    return group.primary.length === 1 && group.secondary.length === 1 && diff(group.primary[0], group.secondary[0]).length === 0;
 }
 
-/** Partition groups: auto-resolve identical pairs; require manual decision for divergent ones. */
-export function partitionByPasswordMatch(groups: DedupGroup[]): {
+/** Partition groups: auto-resolve pairs with no differences; require manual decision for anything that differs. */
+export function partitionByIdenticalMatch(
+    groups: DedupGroup[],
+    diff: RecordFieldDiff
+): {
     identical: DedupGroup[];
     divergent: DedupGroup[];
 } {
     const identical: DedupGroup[] = [];
     const divergent: DedupGroup[] = [];
     for (const group of groups) {
-        (isIdenticalMatch(group) ? identical : divergent).push(group);
+        (isIdenticalMatch(group, diff) ? identical : divergent).push(group);
     }
     return { identical, divergent };
 }

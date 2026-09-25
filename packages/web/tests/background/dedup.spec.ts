@@ -3,13 +3,14 @@ import {
     findExactDuplicateGroups,
     findExactDuplicateMatches,
     findDuplicateGroups,
+    findUuidMatches,
     entriesToRemoveFromDuplicateGroups,
     findNonConflicting,
     isIdenticalMatch,
     matchKey,
     mergeIcon,
     mergeStringField,
-    partitionByPasswordMatch
+    partitionByIdenticalMatch
 } from '../../src/background/dedup';
 import type { IdentifiedRecord } from '../../src/background/dedup';
 
@@ -184,9 +185,9 @@ describe('entriesToRemoveFromDuplicateGroups', () => {
 });
 
 describe('matchKey', () => {
-    test('ignores scheme, subdomain, and public suffix', () => {
+    test('ignores scheme and subdomain', () => {
         const a = matchKey(record({ username: 'alice', url: 'https://login.example.com/path' }));
-        const b = matchKey(record({ username: 'alice', url: 'http://example.org' }));
+        const b = matchKey(record({ username: 'alice', url: 'http://example.com' }));
         expect(a).toBeDefined();
         expect(a).toBe(b);
     });
@@ -197,10 +198,15 @@ describe('matchKey', () => {
         expect(a).toBe(b);
     });
 
-    test('handles multi-part suffixes like .co.uk the same as .com', () => {
-        const a = matchKey(record({ username: 'alice', url: 'https://example.co.uk' }));
-        const b = matchKey(record({ username: 'alice', url: 'https://example.com' }));
-        expect(a).toBe(b);
+    // Was: stripped the whole public suffix, so example.com and example.org counted as one site.
+    test('does not conflate different TLDs or multi-part suffixes', () => {
+        const com = matchKey(record({ username: 'alice', url: 'https://example.com' }));
+        const org = matchKey(record({ username: 'alice', url: 'https://example.org' }));
+        const coUk = matchKey(record({ username: 'alice', url: 'https://example.co.uk' }));
+        expect(com).toBeDefined();
+        expect(com).not.toBe(org);
+        expect(com).not.toBe(coUk);
+        expect(org).not.toBe(coUk);
     });
 
     test('returns undefined when username is missing', () => {
@@ -219,6 +225,24 @@ describe('matchKey', () => {
     });
 });
 
+describe('findUuidMatches', () => {
+    test('matches records sharing a UUID, regardless of how their fields differ', () => {
+        const primary = [record({ uuid: 'shared', title: 'Old title', username: 'alice', password: 'old-pass' })];
+        const secondary = [record({ uuid: 'shared', title: 'New title', username: 'alice', password: 'new-pass' })];
+
+        const matches = findUuidMatches(primary, secondary);
+        expect(matches).toHaveLength(1);
+        expect(matches[0].primary.uuid).toBe('shared');
+        expect(matches[0].secondary.title).toBe('New title');
+    });
+
+    test('does not match records with different UUIDs, even with identical fields', () => {
+        const primary = [record({ uuid: 'p1', title: 'Same', username: 'alice' })];
+        const secondary = [record({ uuid: 's1', title: 'Same', username: 'alice' })];
+        expect(findUuidMatches(primary, secondary)).toEqual([]);
+    });
+});
+
 describe('findDuplicateGroups', () => {
     test('groups matching entries from both sides, skipping entries unique to one side', () => {
         const primary = [
@@ -232,6 +256,7 @@ describe('findDuplicateGroups', () => {
 
         const groups = findDuplicateGroups(primary, secondary);
         expect(groups).toHaveLength(1);
+        expect(groups[0].origin).toBe('heuristic');
         expect(groups[0].primary.map((r) => r.uuid)).toEqual(['p1']);
         expect(groups[0].secondary.map((r) => r.uuid)).toEqual(['s1']);
     });
@@ -251,12 +276,18 @@ describe('findDuplicateGroups', () => {
     test('groups multiple entries sharing the same key on one side', () => {
         const primary = [record({ uuid: 'p1', username: 'alice', url: 'https://example.com' })];
         const secondary = [
-            record({ uuid: 's1', username: 'alice', url: 'https://example.com' }),
-            record({ uuid: 's2', username: 'alice', url: 'https://example.org' })
+            record({ uuid: 's1', username: 'alice', url: 'https://a.example.com' }),
+            record({ uuid: 's2', username: 'alice', url: 'https://b.example.com' })
         ];
         const groups = findDuplicateGroups(primary, secondary);
         expect(groups).toHaveLength(1);
         expect(groups[0].secondary.map((r) => r.uuid).sort()).toEqual(['s1', 's2']);
+    });
+
+    test('does not group entries on different TLDs sharing a username', () => {
+        const primary = [record({ uuid: 'p1', username: 'alice', url: 'https://example.com' })];
+        const secondary = [record({ uuid: 's1', username: 'alice', url: 'https://example.org' })];
+        expect(findDuplicateGroups(primary, secondary)).toEqual([]);
     });
 });
 
@@ -279,37 +310,41 @@ describe('findNonConflicting', () => {
     });
 });
 
+// The real full-field diff (entryFieldDiff) lives in entry-merge.spec.ts; this stand-in only
+// exercises isIdenticalMatch/partitionByIdenticalMatch's own orchestration.
+const passwordOnlyDiff = (a: IdentifiedRecord, b: IdentifiedRecord): string[] => (a.password === b.password ? [] : ['password']);
+
 describe('isIdenticalMatch', () => {
-    test('true for a 1:1 pair with the same password', () => {
+    test('true for a 1:1 pair the diff callback reports no differences for', () => {
         const [group] = findDuplicateGroups(
             [record({ uuid: 'p1', username: 'alice', url: 'https://example.com', password: 'hunter2' })],
             [record({ uuid: 's1', username: 'alice', url: 'https://example.com', password: 'hunter2' })]
         );
-        expect(isIdenticalMatch(group)).toBe(true);
+        expect(isIdenticalMatch(group, passwordOnlyDiff)).toBe(true);
     });
 
-    test('false for a 1:1 pair whose password diverged', () => {
+    test('false for a 1:1 pair the diff callback reports a difference for', () => {
         const [group] = findDuplicateGroups(
             [record({ uuid: 'p1', username: 'alice', url: 'https://example.com', password: 'old-pass' })],
             [record({ uuid: 's1', username: 'alice', url: 'https://example.com', password: 'new-pass' })]
         );
-        expect(isIdenticalMatch(group)).toBe(false);
+        expect(isIdenticalMatch(group, passwordOnlyDiff)).toBe(false);
     });
 
-    test('false when either side has more than one entry, even with matching passwords', () => {
+    test('false when either side has more than one entry, even if the diff callback reports no differences', () => {
         const [group] = findDuplicateGroups(
             [
                 record({ uuid: 'p1', username: 'alice', url: 'https://example.com', password: 'hunter2' }),
-                record({ uuid: 'p2', username: 'alice', url: 'https://example.org', password: 'hunter2' })
+                record({ uuid: 'p2', username: 'alice', url: 'https://a.example.com', password: 'hunter2' })
             ],
             [record({ uuid: 's1', username: 'alice', url: 'https://example.com', password: 'hunter2' })]
         );
-        expect(isIdenticalMatch(group)).toBe(false);
+        expect(isIdenticalMatch(group, () => [])).toBe(false);
     });
 });
 
-describe('partitionByPasswordMatch', () => {
-    test('separates identical pairs from ones needing review', () => {
+describe('partitionByIdenticalMatch', () => {
+    test('separates identical pairs from ones needing review, per the diff callback', () => {
         const groups = findDuplicateGroups(
             [
                 record({ uuid: 'p1', username: 'alice', url: 'https://unchanged.com', password: 'same' }),
@@ -321,9 +356,9 @@ describe('partitionByPasswordMatch', () => {
             ]
         );
 
-        const { identical, divergent } = partitionByPasswordMatch(groups);
-        expect(identical.map((g) => g.key)).toEqual(['alice|unchanged']);
-        expect(divergent.map((g) => g.key)).toEqual(['bob|changed']);
+        const { identical, divergent } = partitionByIdenticalMatch(groups, passwordOnlyDiff);
+        expect(identical.map((g) => g.key)).toEqual(['alice|unchanged.com']);
+        expect(divergent.map((g) => g.key)).toEqual(['bob|changed.com']);
     });
 });
 

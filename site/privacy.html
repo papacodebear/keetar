@@ -40,11 +40,22 @@
       <dt>Favicon lookup</dt>
       <dd>Makes a normal, anonymous favicon request to the website an entry points to. Only when you fetch favicons for an entry or in bulk.</dd>
       <dt>Cloud sync</dt>
-      <dd>Sends your still-encrypted vault file to and from Google's Drive and OAuth APIs on each read and write. The Google OAuth token is stored encrypted on your device. Only if you choose Google Drive.</dd>
+      <dd>Sends your still-encrypted vault file to and from Google's Drive and OAuth APIs on each read and write. The Google OAuth token is stored encrypted on your device, along with your Google account's email address, which is read from Drive and used only to renew that token for the right account. Only if you choose Google Drive.</dd>
       <dt>Google Drive file picker</dt>
       <dd>Loads Google's Picker through <code>google-picker-bridge.papacodebear.workers.dev</code>, a <a href="https://github.com/papacodebear/google-picker-bridge">static page Keetar operates</a> on Cloudflare. That page gets its own separate Google token, which stays on the page. Only the name and ID of the file you pick return to the extension. Only when you use the picker.</dd>
     </dl>
     <p><strong>"Organize with your own AI"</strong> doesn't call any AI service. It generates a text export of titles, URLs and folders, never usernames or passwords, which you paste into an assistant of your choice yourself.</p>
+
+    <h2>Google user data</h2>
+    <p>This section applies only if you connect Google Drive.</p>
+    <ul>
+      <li><strong>What Keetar accesses:</strong> the <code>drive.file</code> permission, which covers only files Keetar created or that you chose with the Google Picker, plus your Google account's email address. Keetar can't see the rest of your Drive.</li>
+      <li><strong>How it's used:</strong> only to read and save the vault file you selected, and to renew Keetar's access to Google Drive for the right account.</li>
+      <li><strong>How it's stored:</strong> the vault file stays in your Drive, with an encrypted copy cached on your device. The access token and email address are stored encrypted on your device. Nothing is stored on a Keetar server.</li>
+      <li><strong>How it's shared:</strong> Keetar doesn't share, sell or transfer Google user data with anyone, and doesn't use it for advertising or to train AI models. Your data is exchanged only between your browser and Google.</li>
+      <li><strong>How to remove it:</strong> disconnect the database in Keetar, uninstall the extension to clear its local data, and revoke access in your <a href="https://myaccount.google.com/permissions">Google Account permissions</a>.</li>
+    </ul>
+    <p>Keetar's use of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
 
     <h2>What Keetar never does</h2>
     <ul>

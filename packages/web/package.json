@@ -1,6 +1,6 @@
 {
   "name": "@keetar/web",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A browser extension that brings native KeePass vault management to Chrome and Firefox — no desktop app required.",
   "private": true,
   "type": "module",

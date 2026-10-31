@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Keetar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A TypeScript-native KeePass-compatible browser extension. No desktop app required.",
   "background": {
     "service_worker": "background.js"

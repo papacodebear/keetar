@@ -76,11 +76,15 @@ export default (env, argv) => {
                             from: path.join(rootDir, 'src/ui/options/options.html'),
                             to: 'options/options.html'
                         },
-                        // Google Picker JS from google-picker-offline-loader package; root-relative via chrome.runtime.getURL().
-                        {
-                            from: path.join(rootDir, 'node_modules/google-picker-offline-loader/vendor/*.js'),
-                            to: 'vendor/google-picker/[name][ext]'
-                        },
+                        // Google Picker JS from google-picker-offline-loader package; Firefox uses the hosted bridge instead.
+                        ...(browser === 'chrome'
+                            ? [
+                                  {
+                                      from: path.join(rootDir, 'node_modules/google-picker-offline-loader/vendor/*.js'),
+                                      to: 'vendor/google-picker/[name][ext]'
+                                  }
+                              ]
+                            : []),
                         // Firefox picker callback page; copied for both browsers (harmless on Chrome).
                         {
                             from: path.join(rootDir, 'src/picker-callback/picker-callback.html'),

@@ -37,7 +37,7 @@ Biometric and security key unlock on Firefox requires version 150 or later.
 
 **Single purpose:** Keetar is a password manager that opens KeePass databases in the browser and fills saved logins into websites.
 
-**Remote code:** No. All code is included in the extension package.
+**Remote code:** No. All code is included in the extension package, including Google's Picker library. The Picker displays Google's own hosted page in a frame.
 
 | Permission | Justification |
 |---|---|
@@ -50,3 +50,23 @@ Biometric and security key unlock on Firefox requires version 150 or later.
 | `tabs` | Reads the active tab's URL to match saved logins, and sends fill requests to that tab. |
 | `identity` | Signs in to Google so the user can store their vault in their own Google Drive. |
 | Host access (`http://*/*`, `https://*/*`) | Detects and fills login forms and offers passkeys on sites the user visits, and fetches favicons when requested. |
+
+## Firefox Add-ons review notes
+
+**Source code:** upload `keetar-source-0.2.0.zip`. The extension's JavaScript is minified, so Mozilla needs the source and build steps.
+
+Build requirements: Node 24+ and pnpm, on Linux, macOS or Windows.
+
+```sh
+pnpm install --frozen-lockfile
+pnpm run build
+```
+
+The add-on is produced in `packages/web/dist/firefox`.
+
+**Notes for the reviewer:**
+
+- `new Function("return this")` in the bundles is webpack's standard global lookup fallback.
+- The `nativeMessaging` optional permission is used only for local databases, through the open-source helper in `packages/host`.
+- Passkey support injects a script into web pages so it can offer Keetar for WebAuthn requests. Users can turn this off in Options.
+- `unsafe` assignment warnings come from React's bundled DOM code.

@@ -23,6 +23,7 @@ import { hasCompleteCapturedLogin, mergeCapturedLogin, type CapturedLogin } from
 import { getConfiguredVault } from '../config/vault-config';
 import { getAutoLockTimeoutSeconds, setAutoLockTimeoutSeconds } from '../config/security-config';
 import { armClipboardClear } from './clipboard-clear';
+import type { RedetectLoginFormMessage } from '../autofill/messages';
 
 // Entry point — registers listeners, initialises session (§2.4).
 
@@ -57,6 +58,16 @@ async function lockVaultAndNotify(): Promise<void> {
     vaultSession.lock();
     await updateToolbarIcon();
     broadcastVaultLocked();
+}
+
+// Pages opened while locked have no entry matches yet; tabs without a content script just reject.
+async function redetectLoginFormsInOpenTabs(): Promise<void> {
+    const message: RedetectLoginFormMessage = { type: 'REDETECT_LOGIN_FORM' };
+    for (const tab of await tabs.query({})) {
+        if (tab.id !== undefined) {
+            void tabs.sendMessage(tab.id, message).catch(() => {});
+        }
+    }
 }
 
 // Bridges content-relay (stashes) to the passkey-prompt iframe (fetches) — lives only for the
@@ -190,12 +201,14 @@ registerMessageHandler(async (request, sender): Promise<KeetarResponse> => {
         case 'UNLOCK_VAULT': {
             const summary = await vaultSession.unlock(request.uuid, request.password);
             void updateToolbarIcon();
+            void redetectLoginFormsInOpenTabs();
             return { ok: true, type: 'UNLOCK_VAULT', summary };
         }
         case 'UNLOCK_VAULT_WITH_HASH': {
             const passwordHash = ByteUtils.arrayToBuffer(ByteUtils.base64ToBytes(request.passwordHashBase64));
             const summary = await vaultSession.unlockWithHash(request.uuid, passwordHash);
             void updateToolbarIcon();
+            void redetectLoginFormsInOpenTabs();
             return { ok: true, type: 'UNLOCK_VAULT_WITH_HASH', summary };
         }
         case 'LOCK_VAULT':

@@ -71,14 +71,21 @@ async function loadPageEntryMatches(form: ReturnType<typeof detectLoginForm>): P
         return;
     }
     for (const field of [form?.usernameField, form?.passwordField]) {
-        field?.addEventListener('click', () => showEntryMenu(field));
+        field?.addEventListener('click', showEntryMenuForClickedField);
     }
     const loginForm = form?.usernameField?.form ?? form?.passwordField?.form;
-    loginForm?.addEventListener('submit', () => {
-        hideEntryMenu();
-        removeEntryMarker();
-    }, { once: true });
+    loginForm?.addEventListener('submit', dismissEntryUi, { once: true });
     showEntryMarker(form?.usernameField ?? form?.passwordField);
+}
+
+// Named so repeat detection re-registers the same function, which addEventListener ignores.
+function showEntryMenuForClickedField(event: Event): void {
+    showEntryMenu(event.currentTarget as HTMLInputElement);
+}
+
+function dismissEntryUi(): void {
+    hideEntryMenu();
+    removeEntryMarker();
 }
 
 // Sites with a strict style-src CSP (no 'unsafe-inline') silently drop <style> tags and

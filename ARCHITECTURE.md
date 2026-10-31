@@ -850,7 +850,7 @@ Direct OAuth is a primary long-term goal (§1.1), sequenced after the local-file
 
 - **Access tokens:** Short-lived (~1 hour), kept in `GoogleDriveProvider`'s in-memory instance field for the session.
 - **No refresh tokens.** The implicit grant never issues one, by design — see below. `providers/oauth-token-store.ts` (AES-256-GCM encrypted in OPFS via `storage/device-secret.ts`) stores `{ accessToken, expiresAt }` only.
-- **"Refresh" is really silent re-authorization.** When the stored access token is expired (or a 401 forces the issue), `getAccessToken()` re-runs the same implicit-grant flow with `interactive: false` — invisible to the user as long as they're still signed into Google in that browser profile; surfaces as an ordinary "Google Drive is not connected" failure otherwise, which Options' existing reconnect UI already handles.
+- **"Refresh" is really silent re-authorization.** When the stored access token is expired (or a 401 forces the issue), `getAccessToken()` re-runs the same implicit-grant flow with `interactive: false`, `prompt=none`, and a `login_hint` of the remembered account — invisible to the user as long as they're still signed into Google in that browser profile; surfaces as an ordinary "Google Drive is not connected" failure otherwise, which Options' existing reconnect UI already handles.
 - **Auto-refresh trigger:** `GoogleDriveProvider.authorizedFetch` intercepts 401 responses, force-refreshes once, retries the original request. A time-based expiry check (`getAccessToken`, 60s margin) avoids hitting 401 for the common case.
 - **Revocation:** `disconnectGoogleDrive()` deletes the OPFS token file and best-effort calls Google's `/revoke` endpoint (failure there doesn't block the local disconnect the user asked for).
 

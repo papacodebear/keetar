@@ -108,7 +108,9 @@ export const identity = {
         return chrome.identity.getRedirectURL(path);
     },
     launchWebAuthFlow(options: { url: string; interactive: boolean }): Promise<string | undefined> {
-        return chrome.identity.launchWebAuthFlow(options);
+        // Google's auth page can redirect after load, which Chrome otherwise treats as needing interaction.
+        const details = { ...options, abortOnLoadForNonInteractive: false, timeoutMsForNonInteractive: 15_000 };
+        return chrome.identity.launchWebAuthFlow(details);
     }
 };
 

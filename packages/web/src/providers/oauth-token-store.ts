@@ -8,6 +8,8 @@ export interface OAuthTokenRecord {
     refreshToken: string | undefined;
     /** Epoch milliseconds. */
     expiresAt: number;
+    /** Targets silent re-auth at the right account when several are signed in. */
+    accountEmail?: string;
 }
 
 function fileName(provider: string): string {

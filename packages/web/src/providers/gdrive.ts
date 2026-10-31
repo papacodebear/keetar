@@ -47,7 +47,24 @@ export class DriveAuthError extends Error {
 
 export async function connectGoogleDrive(): Promise<void> {
     const token = await authorizeImplicit(true);
-    await saveTokens(PROVIDER_KEY, { accessToken: token.accessToken, refreshToken: undefined, expiresAt: token.expiresAt });
+    const accountEmail = await fetchAccountEmail(token.accessToken);
+    await saveTokens(PROVIDER_KEY, { ...token, refreshToken: undefined, accountEmail });
+}
+
+// Best-effort: silent re-auth still works without the hint unless several Google accounts are signed in.
+async function fetchAccountEmail(accessToken: string): Promise<string | undefined> {
+    try {
+        const response = await fetch(`${DRIVE_API}/about?fields=user(emailAddress)`, {
+            headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        if (!response.ok) {
+            return undefined;
+        }
+        const { user } = (await response.json()) as { user?: { emailAddress?: string } };
+        return user?.emailAddress;
+    } catch {
+        return undefined;
+    }
 }
 
 export async function isGoogleDriveConnected(): Promise<boolean> {
@@ -78,7 +95,7 @@ export async function disconnectGoogleDrive(): Promise<void> {
     }
 }
 
-async function authorizeImplicit(interactive: boolean): Promise<{ accessToken: string; expiresAt: number }> {
+async function authorizeImplicit(interactive: boolean, accountEmail?: string): Promise<{ accessToken: string; expiresAt: number }> {
     const redirectUri = identity.getRedirectURL();
     const state = globalThis.crypto.randomUUID();
 
@@ -88,6 +105,13 @@ async function authorizeImplicit(interactive: boolean): Promise<{ accessToken: s
     authUrl.searchParams.set('response_type', 'token');
     authUrl.searchParams.set('scope', DRIVE_SCOPE);
     authUrl.searchParams.set('state', state);
+    // Without this, Google may answer with UI that a hidden flow can't show, which reads as a lost connection.
+    if (!interactive) {
+        authUrl.searchParams.set('prompt', 'none');
+    }
+    if (accountEmail) {
+        authUrl.searchParams.set('login_hint', accountEmail);
+    }
 
     let resultUrl: string | undefined;
     try {
@@ -247,10 +271,12 @@ export async function getAccessToken(cached?: string, forceRefresh = false): Pro
     }
     // Token expired—rerun implicit flow silently (no refresh token); works if user still signed into Google.
     try {
-        const refreshed = await authorizeImplicit(false);
-        await saveTokens(PROVIDER_KEY, { accessToken: refreshed.accessToken, refreshToken: undefined, expiresAt: refreshed.expiresAt });
+        const refreshed = await authorizeImplicit(false, stored.accountEmail);
+        const accountEmail = stored.accountEmail ?? (await fetchAccountEmail(refreshed.accessToken));
+        await saveTokens(PROVIDER_KEY, { ...refreshed, refreshToken: undefined, accountEmail });
         return refreshed.accessToken;
-    } catch {
+    } catch (e) {
+        console.warn('[keetar] silent Google Drive re-auth failed', e instanceof Error ? e.message : e);
         // Distinct type so callers offer a reconnect instead of retrying the same silent flow forever.
         throw new DriveAuthError();
     }

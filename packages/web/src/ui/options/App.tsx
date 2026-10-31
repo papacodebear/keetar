@@ -7,6 +7,7 @@ import {
     ensureNativeHostPermission,
     HOST_INSTALL_URL,
     hostDownloadFor,
+    NativeHostMissingError,
     pickNativeVaultFile,
     type NativeHostStatus
 } from '../../providers/native-file';
@@ -51,13 +52,12 @@ type EntryMode = 'idle' | 'open' | 'create';
 
 const SECTIONS = [
     { id: 'database', label: 'Database' },
-    { id: 'local-files', label: 'Local files' },
     { id: 'biometric', label: 'Biometric unlock' },
     { id: 'passkeys', label: 'Passkeys' },
     { id: 'security', label: 'Security' },
     { id: 'generator', label: 'Password generator' },
     { id: 'trusted-sites', label: 'Trusted sites' }
-].filter(({ id }) => !isChrome || id !== 'local-files');
+] as const;
 
 const HOST_CHECK_INTERVAL_MS = 3000;
 
@@ -134,13 +134,6 @@ export function App() {
                             />
                         )}
                     </section>
-
-                    {!isChrome && (
-                        <section id="local-files">
-                            <h2>Local files</h2>
-                            <NativeHostSection />
-                        </section>
-                    )}
 
                     <section id="biometric">
                         <h2>Biometric unlock</h2>
@@ -409,6 +402,7 @@ function DatabaseSection({
 }) {
     const [pickBusy, setPickBusy] = useState(false);
     const [pickError, setPickError] = useState<string | undefined>(undefined);
+    const [pickNeedsHelper, setPickNeedsHelper] = useState(false);
     const lockState = useVaultLockState(vault);
     const sync = useVaultSyncStatus(vault, onChanged);
 
@@ -433,6 +427,7 @@ function DatabaseSection({
     async function pickNewFile(): Promise<void> {
         setPickBusy(true);
         setPickError(undefined);
+        setPickNeedsHelper(false);
         try {
             if (vault.provider === 'gdrive') {
                 const picked = await showDrivePicker();
@@ -460,7 +455,9 @@ function DatabaseSection({
             }
             await onChanged();
         } catch (e) {
-            if (!isFilePickerCancellation(e)) {
+            if (e instanceof NativeHostMissingError) {
+                setPickNeedsHelper(true);
+            } else if (!isFilePickerCancellation(e)) {
                 setPickError(e instanceof Error ? e.message : String(e));
             }
         } finally {
@@ -516,6 +513,7 @@ function DatabaseSection({
                 </button>
             </div>
             {pickError && <ErrorBox message={pickError} />}
+            {pickNeedsHelper && <HelperNeededBox onConnected={() => setPickNeedsHelper(false)} />}
             {vault.provider === 'gdrive' && sync.status === 'conflict' && (
                 <div className="sync-conflict">
                     <p className="hint">
@@ -575,9 +573,16 @@ function BiometricUnlockSection({
 }
 
 // Firefox needs the helper for local databases; it's rechecked while missing so installing it updates this live.
-function NativeHostSection() {
+function NativeHostSection({ onConnected }: { onConnected: () => void }) {
     const [status, setStatus] = useState<NativeHostStatus | undefined>(undefined);
     const download = hostDownloadFor(navigator.platform);
+
+    useEffect(() => {
+        if (status?.kind === 'connected') {
+            onConnected();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [status?.kind]);
 
     useEffect(() => {
         void checkNativeHostStatus().then(setStatus);
@@ -637,6 +642,15 @@ function NativeHostSection() {
                 Check again
             </button>
         </>
+    );
+}
+
+// Shown where a local-file action failed, then removes itself so the user can simply try again.
+function HelperNeededBox({ onConnected }: { onConnected: () => void }) {
+    return (
+        <ErrorBox message="Local databases in Firefox need the Keetar helper app.">
+            <NativeHostSection onConnected={onConnected} />
+        </ErrorBox>
     );
 }
 
@@ -917,10 +931,12 @@ function OpenVaultFlow({
 }) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | undefined>(undefined);
+    const [needsHelper, setNeedsHelper] = useState(false);
 
     async function openLocal(): Promise<void> {
         setBusy(true);
         setError(undefined);
+        setNeedsHelper(false);
         try {
             if (isChrome) {
                 const { uuid, name } = await pickVaultFile();
@@ -935,7 +951,9 @@ function OpenVaultFlow({
             }
             await onOpened();
         } catch (e) {
-            if (!isFilePickerCancellation(e)) {
+            if (e instanceof NativeHostMissingError) {
+                setNeedsHelper(true);
+            } else if (!isFilePickerCancellation(e)) {
                 setError(e instanceof Error ? e.message : String(e));
             }
         } finally {
@@ -946,6 +964,7 @@ function OpenVaultFlow({
     async function openFromDrive(): Promise<void> {
         setBusy(true);
         setError(undefined);
+        setNeedsHelper(false);
         try {
             const picked = await showDrivePicker();
             if (!picked) {
@@ -978,6 +997,7 @@ function OpenVaultFlow({
                 Cancel
             </button>
             {error && <ErrorBox message={error} />}
+            {needsHelper && <HelperNeededBox onConnected={() => setNeedsHelper(false)} />}
         </div>
     );
 }
@@ -1022,6 +1042,7 @@ function CreateVaultSection({
     const [backend, setBackend] = useState<VaultBackend>('local-file');
     const [busy, setBusy] = useState(false);
     const [message, setMessage] = useState<{ text: string; kind: 'error' | 'success' } | undefined>(undefined);
+    const [needsHelper, setNeedsHelper] = useState(false);
 
     async function create(e: React.FormEvent): Promise<void> {
         e.preventDefault();
@@ -1031,6 +1052,7 @@ function CreateVaultSection({
         }
         setBusy(true);
         setMessage(undefined);
+        setNeedsHelper(false);
         try {
             if (backend === 'local-file' && !isChrome) {
                 await ensureNativeHostPermission();
@@ -1057,7 +1079,9 @@ function CreateVaultSection({
             setMessage({ text: 'Vault created.', kind: 'success' });
             await onChanged();
         } catch (e) {
-            if (!isFilePickerCancellation(e)) {
+            if (e instanceof NativeHostMissingError) {
+                setNeedsHelper(true);
+            } else if (!isFilePickerCancellation(e)) {
                 setMessage({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
             }
         } finally {
@@ -1119,6 +1143,7 @@ function CreateVaultSection({
                     Create vault
                 </button>
             </div>
+            {needsHelper && <HelperNeededBox onConnected={() => setNeedsHelper(false)} />}
             {message &&
                 (message.kind === 'error' ? <ErrorBox message={message.text} /> : <p className="success">{message.text}</p>)}
         </form>
@@ -1209,6 +1234,10 @@ function BiometricSection({
             <p className="hint">
                 Enter the master password once to enroll Touch ID, Windows Hello, or a FIDO2 hardware key for
                 quick unlock.
+            </p>
+            <p className="hint">
+                Setup may ask for your PIN and a touch twice. That's normal: the first registers your key, and the
+                second creates its unlock secret. Unlocking only asks once.
             </p>
             <div className="field">
                 <input

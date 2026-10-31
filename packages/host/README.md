@@ -4,7 +4,7 @@ A small companion program that lets Keetar open and save local KeePass databases
 
 ## Install
 
-Download the file for your system from Keetar's **Local files** section in Options, or from the [releases page](https://github.com/papacodebear/keetar/releases), move it somewhere permanent, and run it once. Each release includes a `SHA256SUMS` file for checking your download.
+Choose **This computer** in Keetar's Options page and it will offer the right download for your system, or get it from the [releases page](https://github.com/papacodebear/keetar/releases), move it somewhere permanent, and run it once. Each release includes a `SHA256SUMS` file for checking your download.
 
 - **Linux:** run `chmod +x` on the file first.
 - **macOS (Apple Silicon):** the helper isn't signed yet, so run `xattr -d com.apple.quarantine` on the file, then `chmod +x`, then run it in Terminal.
@@ -17,7 +17,7 @@ cargo build --release
 ./target/release/keetar-host
 ```
 
-Running it with no arguments registers it with Firefox for your user account, using its current location. If you move it, run it again. Keetar's Options page shows the helper's status under **Local files**, and updates once it's installed.
+Running it with no arguments registers it with Firefox for your user account, using its current location. If you move it, run it again. Keetar's Options page updates once it's installed, and you can then choose **This computer** again.
 
 To remove it, run `keetar-host uninstall` and delete the program.
 

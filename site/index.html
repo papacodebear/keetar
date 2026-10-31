@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Keetar: your KeePass vault in your browser</title>
+  <meta name="description" content="Keetar is an open-source browser extension that reads and writes real KeePass databases. No desktop app, no account and no Keetar server.">
+  <link rel="icon" type="image/png" href="assets/keetar-32.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="top">
+    <a class="brand" href="/"><img src="assets/keetar.svg" alt="" width="32" height="32">Keetar</a>
+    <nav aria-label="Main">
+      <a href="#demo">Demo</a>
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="https://github.com/papacodebear/keetar">GitHub</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <p class="eyebrow">Free and open source · Chrome and Firefox</p>
+      <h1>Your KeePass vault, right in your browser.</h1>
+      <p class="lede">Keetar reads and writes real <code>.kdbx</code> files and fills your logins, with no desktop app, no account and no Keetar server.</p>
+      <div class="actions">
+        <a class="button primary" href="#install">Install</a>
+        <a class="button" href="#demo">Try the demo</a>
+        <a class="button" href="https://github.com/papacodebear/keetar">View the source</a>
+      </div>
+    </section>
+    <div class="keys" aria-hidden="true"></div>
+
+    <section id="demo" class="band">
+      <div class="wrap">
+        <h2>See how it works</h2>
+        <p class="intro">This is a mock-up with made-up data. Nothing here is a real login, and nothing you do leaves this page.</p>
+        <noscript><p class="intro"><strong>The demo needs JavaScript.</strong></p></noscript>
+        <div class="demo">
+          <div class="browser">
+            <div class="address"><span class="dot"></span><span>https://shop.example/login</span></div>
+            <div class="page">
+              <strong>Sign in to Example Shop</strong>
+              <label>Email <input id="demo-user" readonly tabindex="-1"></label>
+              <label>Password <input id="demo-pass" readonly tabindex="-1"></label>
+              <p id="demo-status" class="status" role="status">Click Fill in the Keetar popup.</p>
+            </div>
+          </div>
+          <div class="popup" aria-label="Mock Keetar popup">
+            <div class="popup-head"><strong>Personal.kdbx</strong><span>1 match on this page</span></div>
+            <div class="entry">
+              <div><strong>Example Shop</strong><span>sam@shop.example</span></div>
+              <div class="entry-buttons">
+                <button type="button" id="demo-fill">Fill</button>
+                <button type="button" id="demo-copy-user">User</button>
+                <button type="button" id="demo-copy-pass">Pass</button>
+              </div>
+            </div>
+            <div class="totp"><span>Code <b id="demo-code">------</b></span><span id="demo-seconds">30s</span></div>
+            <div class="generator">
+              <label for="demo-length">Generate a password: <output id="demo-length-value">20</output> characters</label>
+              <input id="demo-length" type="range" min="12" max="40" value="20">
+              <div class="generated"><code id="demo-generated"></code><button type="button" id="demo-generate">New</button></div>
+            </div>
+            <p id="demo-toast" class="toast" role="status"></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="wrap">
+      <h2>Everything your vault needs</h2>
+      <dl class="features">
+        <div><dt>Real KeePass files</dt><dd>Full KDBX4 read and write, so your vault keeps working with KeePassXC and other KeePass apps.</dd></div>
+        <div><dt>Your storage</dt><dd>Open a vault from disk where your browser allows it, or keep it in your own Google Drive.</dd></div>
+        <div><dt>Autofill</dt><dd>Detects login forms, including multi-step sign-ins, and fills only on sites you have trusted.</dd></div>
+        <div><dt>Passwords and passphrases</dt><dd>Generate either one, then let Keetar spot when you use it to change a saved login.</dd></div>
+        <div><dt>Password health</dt><dd>Finds weak, reused, old and breached passwords. Breach checks send only a short hash prefix to Have I Been Pwned.</dd></div>
+        <div><dt>One-time codes</dt><dd>Generate and fill TOTP codes for entries with a stored secret.</dd></div>
+        <div><dt>Passkeys</dt><dd>Optionally create and sign in with passkeys on websites.</dd></div>
+        <div><dt>Hardware key and biometric unlock</dt><dd>Unlock with a FIDO2 security key, Touch ID or Windows Hello through WebAuthn PRF. Firefox needs version 150 or later.</dd></div>
+        <div><dt>Bring your data</dt><dd>Import from CSV, Bitwarden, 1Password and Proton Pass, or combine a second vault into your current one.</dd></div>
+      </dl>
+    </section>
+
+    <section class="band dark">
+      <div class="wrap split">
+        <div>
+          <h2>There is no Keetar server</h2>
+          <p>Your vault is encrypted with the same KDBX4 format KeePassXC uses, and your master password never leaves your device. There's no telemetry and nothing to sign up for.</p>
+          <p><a href="privacy.html">Read exactly what goes where</a></p>
+        </div>
+        <ul class="flow">
+          <li><b>On your device</b>Your master password and decrypted vault</li>
+          <li><b>In your storage</b>The encrypted vault file, on disk or in your Google Drive</li>
+          <li><b>On a Keetar server</b>Nothing, because there isn't one</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="install" class="wrap">
+      <h2>Install</h2>
+      <div class="actions store-links">
+        <!-- Replace these two hrefs with the store listings once published. -->
+        <a class="button primary" href="https://github.com/papacodebear/keetar">Get Keetar for Chrome</a>
+        <a class="button primary" href="https://github.com/papacodebear/keetar">Get Keetar for Firefox</a>
+      </div>
+      <p class="intro">Keetar isn't in the Chrome Web Store or Firefox Add-ons yet, so these links go to GitHub for now. Until then, you can build it from source with Node 24+ and pnpm:</p>
+      <pre><code>git clone https://github.com/papacodebear/keetar.git
+cd keetar
+pnpm install
+pnpm run build</code></pre>
+      <ul class="steps">
+        <li><b>Chrome:</b> open <code>chrome://extensions</code>, turn on Developer mode, choose Load unpacked, and select <code>packages/web/dist/chrome</code>.</li>
+        <li><b>Firefox:</b> open <code>about:debugging#/runtime/this-firefox</code>, choose Load Temporary Add-on, and select any file in <code>packages/web/dist/firefox</code>.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="keys" aria-hidden="true"></div>
+    <p>Keetar is <a href="https://github.com/papacodebear/keetar">open source</a> under GPL-3.0. <a href="privacy.html">Privacy</a> · <a href="https://github.com/papacodebear/keetar/issues">Report an issue</a></p>
+  </footer>
+  <script src="demo.js"></script>
+</body>
+</html>

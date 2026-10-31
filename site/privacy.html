@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy policy · Keetar</title>
+  <meta name="description" content="Exactly what data the Keetar browser extension touches, and where it goes.">
+  <link rel="icon" type="image/png" href="assets/keetar-32.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/"><img src="assets/keetar.svg" alt="" width="32" height="32">Keetar</a>
+    <nav aria-label="Main"><a href="/">Home</a><a href="https://github.com/papacodebear/keetar">GitHub</a></nav>
+  </header>
+  <main class="policy">
+    <h1>Privacy policy</h1>
+    <p><em>Last updated: 2026-10-31</em></p>
+    <p>Keetar is a browser extension that reads and writes KeePass-compatible (KDBX4) password databases. There is no Keetar server, no Keetar account and no telemetry. This page describes what data the extension touches and where it goes.</p>
+
+    <h2>Summary</h2>
+    <ul>
+      <li>Your vault (titles, usernames, passwords, URLs, notes and attachments) is encrypted on your device and never sent to Keetar, because Keetar has no server to send it to.</li>
+      <li>The extension makes a small number of network requests, described below, each triggered by a specific action you take.</li>
+      <li>Nothing is sold, shared with advertisers or used for tracking.</li>
+    </ul>
+
+    <h2>What Keetar stores, and where</h2>
+    <ul>
+      <li><strong>Your vault file</strong> lives wherever you put it: a local file on your device or, if you connect it, a file in your own Google Drive.</li>
+      <li><strong>Vault contents</strong> are encrypted with the KDBX4 format and cryptography KeePassXC uses (Argon2id, AES-256 and ChaCha20). Your master password never leaves your device.</li>
+      <li><strong>Extension settings</strong> are stored locally in the browser's own extension storage and are never synced to a Keetar service.</li>
+      <li><strong>Biometric and hardware key unlock</strong> uses the WebAuthn PRF extension. The cryptographic material involved stays on your device and authenticator. On Firefox, these credentials are labelled with the domain <code>keetar.com</code>, but no request is made to that domain and no data is sent to it.</li>
+    </ul>
+
+    <h2>Network requests the extension makes</h2>
+    <dl>
+      <dt>Breach checking</dt>
+      <dd>Sends a 5-character prefix of a password's SHA-1 hash, never the password or full hash, to <code>api.pwnedpasswords.com</code> (Have I Been Pwned). Only when you run a password health check.</dd>
+      <dt>Favicon lookup</dt>
+      <dd>Makes a normal, anonymous favicon request to the website an entry points to. Only when you fetch favicons for an entry or in bulk.</dd>
+      <dt>Cloud sync</dt>
+      <dd>Sends your still-encrypted vault file to and from Google's Drive and OAuth APIs on each read and write. The Google OAuth token is stored encrypted on your device. Only if you choose Google Drive.</dd>
+      <dt>Google Drive file picker</dt>
+      <dd>Loads Google's Picker through <code>google-picker-bridge.papacodebear.workers.dev</code>, a <a href="https://github.com/papacodebear/google-picker-bridge">static page Keetar operates</a> on Cloudflare. That page gets its own separate Google token, which stays on the page. Only the name and ID of the file you pick return to the extension. Only when you use the picker.</dd>
+    </dl>
+    <p><strong>"Organize with your own AI"</strong> doesn't call any AI service. It generates a text export of titles, URLs and folders, never usernames or passwords, which you paste into an assistant of your choice yourself.</p>
+
+    <h2>What Keetar never does</h2>
+    <ul>
+      <li>Send your master password, vault passwords or decrypted vault contents anywhere.</li>
+      <li>Include analytics, crash reporting or usage tracking.</li>
+      <li>Share data with advertisers or data brokers.</li>
+    </ul>
+
+    <h2>Permissions</h2>
+    <p>Keetar requests browser permissions such as storage, tabs, clipboard write and host access only for what's described here: detecting and filling login forms, copying a password when you ask, and storing your configuration locally.</p>
+
+    <h2>This website</h2>
+    <p>keetar.com is a static site with no cookies, analytics, third-party scripts or accounts. It's hosted on Cloudflare, which may process standard technical request data, such as IP addresses, to serve and protect the site. The demo runs entirely in your browser using made-up data.</p>
+
+    <h2>Changes and contact</h2>
+    <p>If what Keetar does changes in a way that affects this policy, this page and the date above will be updated. Questions can be raised as an <a href="https://github.com/papacodebear/keetar/issues">issue on GitHub</a>.</p>
+  </main>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # Keetar Privacy Policy
 
-_Last updated: 2026-08-13_
+_Last updated: 2026-10-31_
 
 Keetar is a browser extension that reads and writes KeePass-compatible (KDBX4) password databases. There is no Keetar server, no Keetar account, and no telemetry. This document describes, precisely, what data the extension touches and where it goes.
 
@@ -15,7 +15,7 @@ Keetar is a browser extension that reads and writes KeePass-compatible (KDBX4) p
 - **Your vault file** lives wherever you put it: a local file on your device (via the File System Access API) or, if you choose to connect it, a file in your own Google Drive. Keetar never has a copy anywhere else.
 - **Vault contents** are encrypted with the same KDBX4 format and cryptography KeePassXC uses (Argon2id/AES-256/ChaCha20). The master password/key you use to unlock it is never transmitted anywhere and never leaves your device.
 - **Extension settings** (which vault is configured, generator preferences, idle-timeout settings) are stored locally in the browser's own extension storage (`chrome.storage`), never synced to any Keetar-operated service.
-- **Biometric unlock** (Touch ID, Windows Hello, FIDO2 keys) uses the WebAuthn PRF extension. The cryptographic material involved is device-bound and never leaves your device.
+- **Biometric unlock** (Touch ID, Windows Hello, FIDO2 keys) uses the WebAuthn PRF extension. The cryptographic material involved is device-bound and never leaves your device. On Firefox, these credentials are labelled with the domain `keetar.com`, but no request is made to that domain and no data is sent to it.
 
 ## Network requests the extension makes
 

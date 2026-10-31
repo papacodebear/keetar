@@ -3,11 +3,16 @@ import { getKvStore } from '../storage/opfs-kv-store';
 
 // Biometric record per vault: credentialId, prfSalt, wrapped hash always together (§4.1, §6.2).
 
+// The key derives a different PRF secret per mode, so this is fixed at enrollment.
+export type BiometricUserVerification = 'required' | 'discouraged';
+
 export interface BiometricRecord {
     credentialIdBase64: string;
     prfSaltBase64: string;
     wrappedPasswordHashBase64: string;
     enrolledAt: string;
+    /** Absent on records enrolled before this was configurable, which all used 'required'. */
+    userVerification?: BiometricUserVerification;
 }
 
 function fileName(vaultUuid: string): string {

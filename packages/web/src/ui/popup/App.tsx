@@ -14,9 +14,10 @@ import { EntryIcon } from '../shared/EntryIcon';
 import { VaultProviderIcon } from '../shared/VaultProviderIcon';
 import { PasswordGeneratorPanel } from '../shared/PasswordGeneratorPanel';
 import { TotpDisplay } from '../shared/TotpDisplay';
-import { tabs } from '../../platform';
+import { isChrome, tabs } from '../../platform';
 import { ensureVaultFilePermission } from '../../providers/local-file';
 import { openManagerTab } from '../shared/open-manager';
+import { openBiometricUnlockTab } from '../shared/biometric-unlock-tab';
 import { ErrorBox } from '../shared/ErrorBox';
 import { scheduleClipboardClear } from '../../background/clipboard-clear';
 import { isHostTrusted, trustHost } from '../../config/trusted-hosts';
@@ -150,6 +151,11 @@ export function App() {
     }
 
     async function handleBiometricUnlock(vaultUuid: string, vaultName: string, vaultProvider: VaultBackend): Promise<void> {
+        if (!isChrome) {
+            await openBiometricUnlockTab();
+            window.close();
+            return;
+        }
         try {
             if (vaultProvider === 'local-file') {
                 await ensureVaultFilePermission(vaultUuid);

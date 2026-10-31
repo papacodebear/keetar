@@ -5,7 +5,8 @@ import {
     bufferToBase64,
     getBiometricRecord,
     removeBiometricRecord,
-    saveBiometricRecord
+    saveBiometricRecord,
+    type BiometricUserVerification
 } from './biometric-store';
 import { ensureVaultFilePermission } from '../providers/local-file';
 import { createFileProvider } from '../providers';
@@ -28,7 +29,11 @@ export function prefetchForBiometricEnroll(vault: ConfiguredVault): void {
     }
 }
 
-export async function enroll(vault: ConfiguredVault, password: string): Promise<void> {
+export async function enroll(
+    vault: ConfiguredVault,
+    password: string,
+    userVerification: BiometricUserVerification
+): Promise<void> {
     // Verify password before enrolling; typo fails now, not at first unlock (§6.2).
     // File System Access permission is a local-file-only concept; Drive uses its own stored OAuth token.
     if (vault.provider === 'local-file') {
@@ -44,14 +49,15 @@ export async function enroll(vault: ConfiguredVault, password: string): Promise<
     const passwordHash = ByteUtils.arrayToBuffer(credentials.passwordHash.getBinary());
 
     const prfSalt = globalThis.crypto.getRandomValues(new Uint8Array(32)).buffer;
-    const { credentialId, vuk } = await enrollCredential(vault.uuid, prfSalt);
+    const { credentialId, vuk } = await enrollCredential(vault.uuid, prfSalt, userVerification);
     try {
         const wrappedPasswordHash = await SessionKey.wrapKeyMaterial(passwordHash, vuk);
         await saveBiometricRecord(vault.uuid, {
             credentialIdBase64: bufferToBase64(credentialId),
             prfSaltBase64: bufferToBase64(prfSalt),
             wrappedPasswordHashBase64: bufferToBase64(wrappedPasswordHash),
-            enrolledAt: new Date().toISOString()
+            enrolledAt: new Date().toISOString(),
+            userVerification
         });
         prefetchedReads.delete(vault.uuid);
     } finally {
@@ -60,7 +66,7 @@ export async function enroll(vault: ConfiguredVault, password: string): Promise<
 }
 
 // The WebAuthn ceremony right after this needs a still-fresh user gesture, which a Drive round
-// trip can burn through (Firefox then rejects it as "the operation is insecure") — prefer a cache hit.
+// trip can burn through — prefer a cache hit.
 async function readForVerification(vault: ConfiguredVault): Promise<ArrayBuffer> {
     if (vault.provider === 'gdrive') {
         const cached = await readCacheBlob(vault.uuid);
@@ -89,6 +95,6 @@ export async function unlockToPasswordHash(vaultUuid: string): Promise<ArrayBuff
     const prfSalt = base64ToBuffer(record.prfSaltBase64);
     const wrappedPasswordHash = base64ToBuffer(record.wrappedPasswordHashBase64);
 
-    const vuk = await getAssertionVuk(credentialId, prfSalt);
+    const vuk = await getAssertionVuk(credentialId, prfSalt, record.userVerification ?? 'required');
     return SessionKey.unwrapKeyMaterial(wrappedPasswordHash, vuk, 32);
 }

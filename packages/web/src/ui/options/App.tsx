@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ByteUtils } from '@keetar/core';
 import { createVaultFile, ensureVaultFilePermission, pickVaultFile, relinkVaultFile } from '../../providers/local-file';
 import { openManagerTab } from '../shared/open-manager';
+import { closeCurrentTab, consumeBiometricUnlockRequest } from '../shared/biometric-unlock-tab';
 import { ErrorBox } from '../shared/ErrorBox';
 import {
     clearConfiguredVault,
@@ -535,15 +536,9 @@ function BiometricUnlockSection({
     if (!vault) {
         return (
             <div className="section-disabled">
-                <p className="hint">
-                    Enter the master password once to enroll Touch ID, Windows Hello, or a FIDO2 hardware key for
-                    quick unlock.
-                </p>
-                <div className="field">
-                    <input type="password" placeholder="Master password" disabled />
-                </div>
+                <p className="hint">Enroll Touch ID, Windows Hello, or a FIDO2 hardware key for quick unlock.</p>
                 <button type="button" disabled>
-                    Enroll
+                    Set up biometric unlock
                 </button>
                 <p className="hint">Select a database above first.</p>
             </div>
@@ -662,6 +657,15 @@ function UnlockForm({
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | undefined>(undefined);
     const biometricAvailable = enrolled && isWebAuthnSupported();
+    const startedFromPopup = useRef(false);
+
+    useEffect(() => {
+        if (consumeBiometricUnlockRequest() && biometricAvailable) {
+            startedFromPopup.current = true;
+            void submitBiometric();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     async function submit(e: React.FormEvent): Promise<void> {
         e.preventDefault();
@@ -683,7 +687,12 @@ function UnlockForm({
         const result = await lockState.unlockWithBiometrics();
         setBusy(false);
         if (result.ok) {
-            onUnlocked();
+            // Returns to the page the popup was opened on, which redetects its login fields.
+            if (startedFromPopup.current) {
+                closeCurrentTab();
+            } else {
+                onUnlocked();
+            }
         } else {
             setError(result.error);
         }
@@ -1017,6 +1026,8 @@ function BiometricSection({
     const [password, setPassword] = useState('');
     const [busy, setBusy] = useState(false);
     const [message, setMessage] = useState<{ text: string; kind: 'error' | 'success' } | undefined>(undefined);
+    const [enrolling, setEnrolling] = useState(false);
+    const [requireVerification, setRequireVerification] = useState(true);
 
     // Starts the Drive round trip the moment this section is on the page, not on click — by
     // enroll time the bytes are usually already there, so the WebAuthn call keeps a fresh gesture.
@@ -1042,8 +1053,9 @@ function BiometricSection({
         setBusy(true);
         setMessage(undefined);
         try {
-            await enroll(vault, password);
+            await enroll(vault, password, requireVerification ? 'required' : 'discouraged');
             setPassword('');
+            setEnrolling(false);
             setMessage({ text: 'Biometric unlock enrolled.', kind: 'success' });
             await onChanged();
         } catch (e) {
@@ -1063,6 +1075,24 @@ function BiometricSection({
         }
     }
 
+    function cancelEnrolling(): void {
+        setEnrolling(false);
+        setPassword('');
+        setMessage(undefined);
+    }
+
+    // Password field stays hidden until asked for, so it can't be mistaken for the unlock form above.
+    if (!enrolling) {
+        return (
+            <div>
+                <p className="hint">Enroll Touch ID, Windows Hello, or a FIDO2 hardware key for quick unlock.</p>
+                <button type="button" onClick={() => setEnrolling(true)}>
+                    Set up biometric unlock
+                </button>
+            </div>
+        );
+    }
+
     return (
         <form onSubmit={(e) => void enrollNow(e)}>
             <p className="hint">
@@ -1072,15 +1102,34 @@ function BiometricSection({
             <div className="field">
                 <input
                     type="password"
+                    autoFocus
                     autoComplete="off"
-                    placeholder="Master password"
+                    placeholder="Keepass DB Password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     disabled={busy}
                 />
             </div>
+            <label>
+                <input
+                    type="checkbox"
+                    checked={requireVerification}
+                    onChange={(e) => setRequireVerification(e.target.checked)}
+                    disabled={busy}
+                />{' '}
+                Require a PIN or biometric at each unlock (recommended)
+            </label>
+            {!requireVerification && (
+                <p className="hint">
+                    Anyone with this browser profile and your security key could unlock the vault with a touch. To
+                    change this later, remove biometric unlock and enroll again.
+                </p>
+            )}
             <button type="submit" disabled={busy || !password}>
                 Enroll
+            </button>{' '}
+            <button type="button" onClick={cancelEnrolling} disabled={busy}>
+                Cancel
             </button>
             {message &&
                 (message.kind === 'error' ? <ErrorBox message={message.text} /> : <p className="success">{message.text}</p>)}

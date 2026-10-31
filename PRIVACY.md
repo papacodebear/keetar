@@ -17,6 +17,8 @@ Keetar is a browser extension that reads and writes KeePass-compatible (KDBX4) p
 - **Extension settings** (which vault is configured, generator preferences, idle-timeout settings) are stored locally in the browser's own extension storage (`chrome.storage`), never synced to any Keetar-operated service.
 - **Biometric unlock** (Touch ID, Windows Hello, FIDO2 keys) uses the WebAuthn PRF extension. The cryptographic material involved is device-bound and never leaves your device. On Firefox, these credentials are labelled with the domain `keetar.com`, but no request is made to that domain and no data is sent to it.
 
+- **Local files in Firefox** use the optional [Keetar helper](packages/host), a small program you install yourself. It only reads and writes files you chose in your system's file dialog, keeps a local list of those file paths, and makes no network connections.
+
 ## Network requests the extension makes
 
 Keetar only makes network requests your own actions trigger — to Keetar's own infrastructure in one specific case (the Drive file picker, below), and to third parties otherwise:

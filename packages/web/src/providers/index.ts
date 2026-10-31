@@ -2,6 +2,7 @@ import type { FileProvider } from '@keetar/core';
 import type { ConfiguredVault } from '../config/vault-config';
 import { GoogleDriveProvider } from './gdrive';
 import { LocalFileProvider } from './local-file';
+import { NativeFileProvider } from './native-file';
 import { OpfsCachedProvider, type SyncStatus } from './opfs-cache';
 
 // Provider-factory: maps ConfiguredVault.provider to FileProvider; cloud wrapped in OpfsCachedProvider for offline + conflict detection.
@@ -9,6 +10,8 @@ export function createFileProvider(vault: ConfiguredVault): FileProvider {
     switch (vault.provider) {
         case 'local-file':
             return new LocalFileProvider(vault.uuid);
+        case 'native-file':
+            return new NativeFileProvider();
         case 'gdrive':
             return new OpfsCachedProvider(vault.uuid, new GoogleDriveProvider());
     }

@@ -1,14 +1,14 @@
 import { storage } from '../platform';
 
 // Configured vault shared between file selection and Popup.
-export type VaultBackend = 'local-file' | 'gdrive';
+export type VaultBackend = 'local-file' | 'native-file' | 'gdrive';
 
 export interface ConfiguredVault {
     uuid: string;
     name: string;
     /** §7.3/§10 — defaults implied as 'local-file' historically; explicit now that a second backend exists. */
     provider: VaultBackend;
-    /** Cloud providers only — e.g. a Google Drive file ID. Local-file's identity is entirely the uuid-keyed handle (IndexedDB, local-file.ts). */
+    /** A Google Drive file ID or a native-file absolute path. Local-file's identity is entirely the uuid-keyed handle (IndexedDB, local-file.ts). */
     path?: string;
 }
 

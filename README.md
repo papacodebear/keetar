@@ -30,12 +30,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for how it's built, and [PRIVACY.md](PRIV
 
 ## Project layout
 
-A pnpm monorepo with two packages:
+A pnpm monorepo with two packages, plus an optional Rust helper:
 
 | Package | What it is |
 |---|---|
 | [`@keetar/core`](packages/core) | An isomorphic, browser-API-free TypeScript library: KDBX4 parsing/writing, crypto, password/passphrase generation, TOTP, password health, and import/export. Runs and tests in plain Node. |
 | [`@keetar/web`](packages/web) | The browser extension itself — background service worker, popup, manager UI, options page, and content scripts — built on `@keetar/core`. |
+| [`keetar-host`](packages/host) | An optional helper program that lets Firefox open and save local vault files. Not needed on Chrome or for Google Drive. |
 
 ## Developing
 

@@ -37,6 +37,11 @@ declare const browser: {
     };
     runtime: {
         sendMessage(message: unknown): Promise<unknown>;
+        connectNative(application: string): chrome.runtime.Port;
+    };
+    permissions: {
+        request(permissions: { permissions: string[] }): Promise<boolean>;
+        contains(permissions: { permissions: string[] }): Promise<boolean>;
     };
     tabs: {
         query(queryInfo: chrome.tabs.QueryInfo): Promise<chrome.tabs.Tab[]>;
@@ -102,6 +107,18 @@ export const alarms = {
 export const runtime = {
     sendMessage<T>(message: unknown): Promise<T> {
         return browser.runtime.sendMessage(message) as Promise<T>;
+    }
+};
+
+export const nativeMessaging = {
+    connect(application: string): chrome.runtime.Port {
+        return browser.runtime.connectNative(application);
+    },
+    requestPermission(): Promise<boolean> {
+        return browser.permissions.request({ permissions: ['nativeMessaging'] });
+    },
+    hasPermission(): Promise<boolean> {
+        return browser.permissions.contains({ permissions: ['nativeMessaging'] });
     }
 };
 

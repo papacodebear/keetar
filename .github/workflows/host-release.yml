@@ -1,0 +1,82 @@
+name: Helper release
+
+on:
+  push:
+    tags:
+      - 'host-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Oldest supported runner, so the binary works on older glibc versions too.
+          - runner: ubuntu-22.04
+            asset: keetar-host-linux-x86_64
+            binary: keetar-host
+          - runner: macos-14
+            asset: keetar-host-macos-aarch64
+            binary: keetar-host
+          - runner: windows-latest
+            asset: keetar-host-windows-x86_64.exe
+            binary: keetar-host.exe
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: packages/host
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check the tag matches the crate version
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          test "${GITHUB_REF_NAME}" = "host-v${VERSION}"
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Rename for upload
+        run: |
+          mkdir -p upload
+          cp "target/release/${{ matrix.binary }}" "upload/${{ matrix.asset }}"
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: packages/host/upload/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download builds
+        uses: actions/download-artifact@v4
+        with:
+          path: upload
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: upload
+        run: sha256sum keetar-host-* > SHA256SUMS
+
+      # Not marked latest, so it never displaces the extension's own releases.
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" upload/* \
+            --title "Keetar helper ${GITHUB_REF_NAME#host-v}" \
+            --notes "Helper app for opening local databases in Firefox. See packages/host for install steps." \
+            --latest=false

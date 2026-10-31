@@ -102,6 +102,19 @@ export const clipboard = {
     }
 };
 
+// Chrome reaches local files through the File System Access API, so it never needs the helper app.
+export const nativeMessaging = {
+    connect(_application: string): chrome.runtime.Port {
+        throw new Error('the helper app is only used on Firefox');
+    },
+    async requestPermission(): Promise<boolean> {
+        return false;
+    },
+    async hasPermission(): Promise<boolean> {
+        return false;
+    }
+};
+
 // Google Drive OAuth via PKCE (shared implementation; getAuthToken Chrome-only; §7.3).
 export const identity = {
     getRedirectURL(path?: string): string {

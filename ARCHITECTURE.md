@@ -774,6 +774,8 @@ If the active backend is the local-file provider (§4.2), fold `handle.requestPe
 | Safari 16+ | Passkeys (resident keys) only. PRF extension not supported. Fall back to password-only unlock. |
 | Older | Detect via `try/catch` on `getClientExtensionResults().prf`. Fall back gracefully. |
 
+Firefox has no File System Access API, so local vaults there use the optional `packages/host` native messaging helper through `providers/native-file.ts`. This is the one exception to "no desktop app required", and only for that backend. The helper restricts itself to files chosen in an OS dialog.
+
 ### 6.4 WebHID YubiKey (HMAC-SHA1 Challenge-Response)
 
 This is the legacy YubiKey mode used by KeePassXC desktop (distinct from FIDO2).

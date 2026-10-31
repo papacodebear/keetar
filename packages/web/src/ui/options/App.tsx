@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { ByteUtils } from '@keetar/core';
 import { createVaultFile, ensureVaultFilePermission, pickVaultFile, relinkVaultFile } from '../../providers/local-file';
+import {
+    checkNativeHostStatus,
+    createNativeVaultFile,
+    ensureNativeHostPermission,
+    HOST_INSTALL_URL,
+    hostDownloadFor,
+    pickNativeVaultFile,
+    type NativeHostStatus
+} from '../../providers/native-file';
+import { isChrome } from '../../platform';
 import { openManagerTab } from '../shared/open-manager';
 import { closeCurrentTab, consumeBiometricUnlockRequest } from '../shared/biometric-unlock-tab';
 import { ErrorBox } from '../shared/ErrorBox';
@@ -41,12 +51,15 @@ type EntryMode = 'idle' | 'open' | 'create';
 
 const SECTIONS = [
     { id: 'database', label: 'Database' },
+    { id: 'local-files', label: 'Local files' },
     { id: 'biometric', label: 'Biometric unlock' },
     { id: 'passkeys', label: 'Passkeys' },
     { id: 'security', label: 'Security' },
     { id: 'generator', label: 'Password generator' },
     { id: 'trusted-sites', label: 'Trusted sites' }
-] as const;
+].filter(({ id }) => !isChrome || id !== 'local-files');
+
+const HOST_CHECK_INTERVAL_MS = 3000;
 
 function isFilePickerCancellation(error: unknown): boolean {
     return error instanceof DOMException && error.name === 'AbortError';
@@ -121,6 +134,13 @@ export function App() {
                             />
                         )}
                     </section>
+
+                    {!isChrome && (
+                        <section id="local-files">
+                            <h2>Local files</h2>
+                            <NativeHostSection />
+                        </section>
+                    )}
 
                     <section id="biometric">
                         <h2>Biometric unlock</h2>
@@ -425,6 +445,13 @@ function DatabaseSection({
                     provider: 'gdrive',
                     path: picked.fileId
                 });
+            } else if (vault.provider === 'native-file') {
+                await ensureNativeHostPermission();
+                const picked = await pickNativeVaultFile();
+                if (!picked) {
+                    return;
+                }
+                await setConfiguredVault({ ...vault, name: picked.name, path: picked.path });
             } else {
                 // Re-link the same vault identity to a new handle — a new uuid here would silently
                 // orphan biometric enrollment (and anything else keyed by this vault's uuid).
@@ -545,6 +572,72 @@ function BiometricUnlockSection({
         );
     }
     return <BiometricSection vault={vault} enrolled={enrolled} onChanged={onChanged} />;
+}
+
+// Firefox needs the helper for local databases; it's rechecked while missing so installing it updates this live.
+function NativeHostSection() {
+    const [status, setStatus] = useState<NativeHostStatus | undefined>(undefined);
+    const download = hostDownloadFor(navigator.platform);
+
+    useEffect(() => {
+        void checkNativeHostStatus().then(setStatus);
+    }, []);
+
+    useEffect(() => {
+        if (status?.kind !== 'missing') {
+            return;
+        }
+        const timer = setInterval(() => void checkNativeHostStatus().then(setStatus), HOST_CHECK_INTERVAL_MS);
+        return () => clearInterval(timer);
+    }, [status?.kind]);
+
+    async function allow(): Promise<void> {
+        try {
+            await ensureNativeHostPermission();
+            setStatus(await checkNativeHostStatus());
+        } catch (e) {
+            setStatus({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
+        }
+    }
+
+    if (!status) {
+        return <p className="hint">Checking for the helper app…</p>;
+    }
+    if (status.kind === 'connected') {
+        return <p className="success">Helper app connected (version {status.version}).</p>;
+    }
+    if (status.kind === 'needs-permission') {
+        return (
+            <>
+                <p className="hint">Firefox needs the Keetar helper app to open and save databases on this computer.</p>
+                <button type="button" onClick={() => void allow()}>
+                    Allow Keetar to use the helper app
+                </button>
+            </>
+        );
+    }
+    return (
+        <>
+            {status.kind === 'error' ? (
+                <ErrorBox message={status.message} />
+            ) : (
+                <p className="hint">The helper app isn't installed yet. This page will update once it is.</p>
+            )}
+            {download && (
+                <p>
+                    <a href={download.url}>Download the helper app for {download.label}</a>
+                    <br />
+                    <span className="hint">{download.instructions}</span>
+                </p>
+            )}
+            <a href={HOST_INSTALL_URL} target="_blank" rel="noreferrer">
+                Full install steps
+            </a>{' '}
+            <button type="button" onClick={() => void checkNativeHostStatus().then(setStatus)}>
+                Check again
+            </button>
+        </>
+    );
 }
 
 function PasskeySection() {
@@ -829,8 +922,17 @@ function OpenVaultFlow({
         setBusy(true);
         setError(undefined);
         try {
-            const { uuid, name } = await pickVaultFile();
-            await setConfiguredVault({ uuid, name, provider: 'local-file' });
+            if (isChrome) {
+                const { uuid, name } = await pickVaultFile();
+                await setConfiguredVault({ uuid, name, provider: 'local-file' });
+            } else {
+                await ensureNativeHostPermission();
+                const picked = await pickNativeVaultFile();
+                if (!picked) {
+                    return;
+                }
+                await setConfiguredVault({ uuid: crypto.randomUUID(), ...picked, provider: 'native-file' });
+            }
             await onOpened();
         } catch (e) {
             if (!isFilePickerCancellation(e)) {
@@ -930,15 +1032,24 @@ function CreateVaultSection({
         setBusy(true);
         setMessage(undefined);
         try {
+            if (backend === 'local-file' && !isChrome) {
+                await ensureNativeHostPermission();
+            }
             const data = await createEmptyVaultBytes(name, password);
             if (backend === 'gdrive') {
                 await ensureGoogleDriveAuthorized();
                 onGdriveConnectedChange(true);
                 const { fileId } = await new GoogleDriveProvider().createFile(name, data);
                 await setConfiguredVault({ uuid: crypto.randomUUID(), name, provider: 'gdrive', path: fileId });
-            } else {
+            } else if (isChrome) {
                 const created = await createVaultFile(name, data);
                 await setConfiguredVault({ uuid: created.uuid, name: created.name, provider: 'local-file' });
+            } else {
+                const created = await createNativeVaultFile(name, data);
+                if (!created) {
+                    return;
+                }
+                await setConfiguredVault({ uuid: crypto.randomUUID(), ...created, provider: 'native-file' });
             }
             setName('');
             setPassword('');

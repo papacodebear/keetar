@@ -148,3 +148,6 @@ vite.config.ts.timestamp-*
 # directly into src/ as a side effect when declaration emit was left on.
 packages/web/src/**/*.d.ts
 packages/web/src/**/*.d.ts.map
+
+# Rust build output
+packages/host/target/

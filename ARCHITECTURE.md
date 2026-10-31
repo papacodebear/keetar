@@ -770,7 +770,7 @@ If the active backend is the local-file provider (§4.2), fold `handle.requestPe
 | Browser | Support |
 |---|---|
 | Chrome 116+ | Full PRF — platform authenticators (Touch ID, Windows Hello) + FIDO2 hardware keys |
-| Firefox 119+ | Full PRF — platform authenticators + FIDO2 hardware keys |
+| Firefox 150+ | Full PRF — platform authenticators + FIDO2 hardware keys. Requires an explicit RP ID within host permissions (`keetar.com`), and the popup starts unlock in an Options tab because popups close on the credential prompt (bug 2026687). |
 | Safari 16+ | Passkeys (resident keys) only. PRF extension not supported. Fall back to password-only unlock. |
 | Older | Detect via `try/catch` on `getClientExtensionResults().prf`. Fall back gracefully. |
 

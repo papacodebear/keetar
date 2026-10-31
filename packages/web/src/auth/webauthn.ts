@@ -1,7 +1,13 @@
 import type { PrfExtensionInput } from './prf';
 import { extractVuk, isPrfEnabled } from './prf';
+import { isChrome } from '../platform';
+import type { BiometricUserVerification } from './biometric-store';
 
 // WebAuthn registration & assertion require document context + user gesture (§6.2).
+
+// Firefox 150+ rejects the default moz-extension RP ID; this domain is ours and within host permissions.
+// Chrome keeps its default, since changing an RP ID invalidates every credential enrolled under it.
+const RP_ID = isChrome ? undefined : 'keetar.com';
 
 export function isWebAuthnSupported(): boolean {
     return typeof navigator !== 'undefined' && typeof navigator.credentials !== 'undefined';
@@ -13,7 +19,11 @@ export interface EnrollResult {
 }
 
 // Register credential; evaluate PRF at creation if supported, else via follow-up assertion.
-export async function enrollCredential(vaultUuid: string, prfSalt: ArrayBuffer): Promise<EnrollResult> {
+export async function enrollCredential(
+    vaultUuid: string,
+    prfSalt: ArrayBuffer,
+    userVerification: BiometricUserVerification
+): Promise<EnrollResult> {
     if (!isWebAuthnSupported()) {
         throw new Error('WebAuthn is not supported in this browser');
     }
@@ -24,10 +34,10 @@ export async function enrollCredential(vaultUuid: string, prfSalt: ArrayBuffer):
         credential = (await navigator.credentials.create({
             publicKey: {
                 challenge: globalThis.crypto.getRandomValues(new Uint8Array(32)),
-                rp: { name: 'Keetar' },
+                rp: { id: RP_ID, name: 'Keetar' },
                 user: { id: userId, name: 'Keetar vault', displayName: 'Keetar vault' },
                 pubKeyCredParams: [{ type: 'public-key', alg: -7 }], // ES256
-                authenticatorSelection: { userVerification: 'required' },
+                authenticatorSelection: { userVerification },
                 extensions: prfExtension as AuthenticationExtensionsClientInputs
             }
         })) as PublicKeyCredential | null;
@@ -38,6 +48,9 @@ export async function enrollCredential(vaultUuid: string, prfSalt: ArrayBuffer):
             message: e instanceof Error ? e.message : String(e),
             origin: typeof location !== 'undefined' ? location.origin : undefined
         });
+        if (!isChrome && e instanceof DOMException && e.name === 'SecurityError') {
+            throw new Error('Biometric unlock requires Firefox 150 or later.');
+        }
         throw e;
     }
     if (!credential) {
@@ -49,22 +62,27 @@ export async function enrollCredential(vaultUuid: string, prfSalt: ArrayBuffer):
     let vuk = extractVuk(credential);
     if (!vuk) {
         // Not evaluated during creation; get via follow-up assertion (§6.2).
-        vuk = await getAssertionVuk(credential.rawId, prfSalt);
+        vuk = await getAssertionVuk(credential.rawId, prfSalt, userVerification);
     }
     return { credentialId: credential.rawId, vuk };
 }
 
 // Assertion ceremony: returns VUK for unlock (§6.2).
-export async function getAssertionVuk(credentialId: ArrayBuffer, prfSalt: ArrayBuffer): Promise<ArrayBuffer> {
+export async function getAssertionVuk(
+    credentialId: ArrayBuffer,
+    prfSalt: ArrayBuffer,
+    userVerification: BiometricUserVerification
+): Promise<ArrayBuffer> {
     if (!isWebAuthnSupported()) {
         throw new Error('WebAuthn is not supported in this browser');
     }
     const prfExtension: PrfExtensionInput = { prf: { eval: { first: prfSalt } } };
     const credential = (await navigator.credentials.get({
         publicKey: {
+            rpId: RP_ID,
             challenge: globalThis.crypto.getRandomValues(new Uint8Array(32)),
             allowCredentials: [{ id: credentialId, type: 'public-key' }],
-            userVerification: 'required',
+            userVerification,
             extensions: prfExtension as AuthenticationExtensionsClientInputs
         }
     })) as PublicKeyCredential | null;

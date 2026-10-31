@@ -66,6 +66,7 @@ The add-on is produced in `packages/web/dist/firefox`.
 
 **Notes for the reviewer:**
 
+- Breach checking sends the first 5 characters of a password's SHA-1 hash to `api.pwnedpasswords.com`. It's declared as optional `authenticationInfo` and only runs after consent, requested with `permissions.request` from a button in the password health panel. The health check works without it.
 - `new Function("return this")` in the bundles is webpack's standard global lookup fallback.
 - The `nativeMessaging` optional permission is used only for local databases, through the open-source helper in `packages/host`.
 - Passkey support injects a script into web pages so it can offer Keetar for WebAuthn requests. Users can turn this off in Options.

@@ -16,3 +16,13 @@ describe('manifests never declare externally_connectable', () => {
         });
     }
 });
+
+describe('Firefox data collection declaration', () => {
+    test('breach checking is optional, so nothing is collected without consent', () => {
+        const manifest = JSON.parse(readFileSync(path.join(manifestsDir, 'manifest.firefox.json'), 'utf8'));
+        expect(manifest.browser_specific_settings.gecko.data_collection_permissions).toEqual({
+            required: ['none'],
+            optional: ['authenticationInfo']
+        });
+    });
+});

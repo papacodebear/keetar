@@ -24,6 +24,8 @@ export interface PasswordHealthReport {
     old: number;
     breached: number;
     similar: number;
+    /** True when breach data wasn't checked, so `breached` and each `breachCount` mean nothing. */
+    breachCheckSkipped?: boolean;
 }
 
 export type PasswordBreachChecker = (password: string) => Promise<number>;

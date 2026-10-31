@@ -102,6 +102,15 @@ export const clipboard = {
     }
 };
 
+export const breachCheckConsent = {
+    async isGranted(): Promise<boolean> {
+        return true;
+    },
+    async request(): Promise<boolean> {
+        return true;
+    }
+};
+
 // Chrome reaches local files through the File System Access API, so it never needs the helper app.
 export const nativeMessaging = {
     connect(_application: string): chrome.runtime.Port {

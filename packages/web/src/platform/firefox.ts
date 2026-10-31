@@ -40,8 +40,9 @@ declare const browser: {
         connectNative(application: string): chrome.runtime.Port;
     };
     permissions: {
-        request(permissions: { permissions: string[] }): Promise<boolean>;
+        request(permissions: { permissions?: string[]; data_collection?: string[] }): Promise<boolean>;
         contains(permissions: { permissions: string[] }): Promise<boolean>;
+        getAll(): Promise<{ data_collection?: string[] }>;
     };
     tabs: {
         query(queryInfo: chrome.tabs.QueryInfo): Promise<chrome.tabs.Tab[]>;
@@ -107,6 +108,18 @@ export const alarms = {
 export const runtime = {
     sendMessage<T>(message: unknown): Promise<T> {
         return browser.runtime.sendMessage(message) as Promise<T>;
+    }
+};
+
+// Mozilla treats anything derived from a password as authenticationInfo, which needs explicit consent.
+const BREACH_CHECK_DATA = 'authenticationInfo';
+
+export const breachCheckConsent = {
+    async isGranted(): Promise<boolean> {
+        return (await browser.permissions.getAll()).data_collection?.includes(BREACH_CHECK_DATA) ?? false;
+    },
+    request(): Promise<boolean> {
+        return browser.permissions.request({ data_collection: [BREACH_CHECK_DATA] });
     }
 };
 

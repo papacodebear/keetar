@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ByteUtils, estimatePasswordEntropy, type PasswordHealthFinding } from '@keetar/core';
 import { onVaultLocked, sendToBackground } from '../../background/message-bus';
+import { breachCheckConsent } from '../../platform';
 import type { KeetarRequest, KeetarResponse } from '../../background/message-bus';
 import { EntryIcon } from '../shared/EntryIcon';
 import { VaultProviderIcon } from '../shared/VaultProviderIcon';
@@ -368,6 +369,13 @@ function Ready({
         }
     }
 
+    // Must start directly from the click, since Firefox only shows this consent prompt during a user gesture.
+    async function enableBreachCheck(): Promise<void> {
+        if (await breachCheckConsent.request()) {
+            await loadPasswordHealth();
+        }
+    }
+
     // Bulk fetch favicons for all entries with URL but no custom icon.
     async function fetchAllFavicons(): Promise<void> {
         setFetchingFavicons(true);
@@ -662,6 +670,7 @@ function Ready({
                         findingEntries={healthFindingEntries}
                         selectedEntryUuid={selectedEntryUuid}
                         onSelectEntry={selectHealthEntry}
+                        onEnableBreachCheck={() => void enableBreachCheck()}
                         onDuplicatesRemoved={() => {
                             void onReload({ groupUuid: selectedGroupUuid });
                             void loadPasswordHealth();
@@ -803,6 +812,7 @@ function PasswordHealthPanel({
     findingEntries,
     selectedEntryUuid,
     onSelectEntry,
+    onEnableBreachCheck,
     onDuplicatesRemoved,
     onClose
 }: {
@@ -811,6 +821,7 @@ function PasswordHealthPanel({
     findingEntries: { finding: PasswordHealthFinding; entry: EntrySummary }[];
     selectedEntryUuid: string | undefined;
     onSelectEntry: (entryUuid: string) => void;
+    onEnableBreachCheck: () => void;
     onDuplicatesRemoved: () => void;
     onClose: () => void;
 }) {
@@ -908,9 +919,22 @@ function PasswordHealthPanel({
                 </div>
             )}
             <p>
-                {report.total} entries: {report.weak} weak, {report.reused} reused, {report.old} old, {report.breached}{' '}
-                breached, {report.similar} similar to another entry.
+                {report.total} entries: {report.weak} weak, {report.reused} reused, {report.old} old,{' '}
+                {!report.breachCheckSkipped && `${report.breached} breached, `}
+                {report.similar} similar to another entry.
             </p>
+            {report.breachCheckSkipped && (
+                <div className="empty-state">
+                    <p>
+                        Breached passwords weren't checked. To check them, Keetar sends the first 5 characters of each
+                        password's SHA-1 hash to Have I Been Pwned. Your passwords are never sent, and Keetar doesn't
+                        keep this data.
+                    </p>
+                    <button type="button" onClick={onEnableBreachCheck}>
+                        Allow breach checking
+                    </button>
+                </div>
+            )}
             {findingEntries.length === 0 ? (
                 <p className="empty-state">No password issues found.</p>
             ) : (

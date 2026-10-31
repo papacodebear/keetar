@@ -57,6 +57,7 @@ import {
     partitionByIdenticalMatch
 } from './dedup';
 import type { DedupGroup, IdentifiedRecord } from './dedup';
+import { breachCheckConsent } from '../platform';
 
 // In-memory decrypted vault state, lost on lock or SW termination (§3.4).
 
@@ -344,8 +345,11 @@ class VaultSession {
                     lastModified: source ? source.times.lastModTime : entry.times.lastModTime
                 };
             });
-        const report = await analysePasswordHealth(entries, (password) => this.hibpClient.checkPassword(password));
-        return applyCloneAwareness(report, cloneEntries);
+        const breachCheckAllowed = await breachCheckConsent.isGranted();
+        const report = await analysePasswordHealth(entries, async (password) =>
+            breachCheckAllowed ? this.hibpClient.checkPassword(password) : 0
+        );
+        return { ...applyCloneAwareness(report, cloneEntries), breachCheckSkipped: !breachCheckAllowed };
     }
 
     getDuplicateCredentialGroups(): DuplicateCredentialGroup[] {

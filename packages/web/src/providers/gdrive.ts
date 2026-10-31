@@ -10,7 +10,7 @@ const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
 // Implicit grant: no client_secret (authorization_code requires it; Chrome Extension client broken); no refresh token—reauth silently when expired.
-// Exported for bridge; needs manual console setup: google-picker-bridge.papacodebear.workers.dev/auth-return.html as redirect URI.
+// Exported for bridge; needs manual console setup: picker.keetar.com/auth-return.html as redirect URI.
 export const GOOGLE_CLIENT_ID = '131716196054-fbmcknr0o1m09973k9m9ksph52ec4n7e.apps.googleusercontent.com';
 
 // Separate API key for Picker, restricted in Cloud Console by HTTP referrer.

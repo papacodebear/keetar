@@ -58,7 +58,7 @@ async function showDrivePickerDirect(accessToken: string): Promise<{ fileId: str
 
 // Firefox: Picker rejects moz-extension:// (confirmed 2026-08-06)—route through Cloudflare bridge. Popup not iframe (ancestorOrigins check).
 // URL params in hash (postMessage broken on Firefox). Bridge runs own implicit-grant for session cookie scoping.
-const BRIDGE_URL = 'https://google-picker-bridge.papacodebear.workers.dev/';
+const BRIDGE_URL = 'https://picker.keetar.com/';
 const CALLBACK_PATH = 'picker-callback/picker-callback.html';
 
 interface PickerCallbackMessage {

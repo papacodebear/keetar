@@ -42,7 +42,7 @@
       <dt>Cloud sync</dt>
       <dd>Sends your still-encrypted vault file to and from Google's Drive and OAuth APIs on each read and write. The Google OAuth token is stored encrypted on your device, along with your Google account's email address, which is read from Drive and used only to renew that token for the right account. Only if you choose Google Drive.</dd>
       <dt>Google Drive file picker</dt>
-      <dd>Loads Google's Picker through <code>google-picker-bridge.papacodebear.workers.dev</code>, a <a href="https://github.com/papacodebear/google-picker-bridge">static page Keetar operates</a> on Cloudflare. That page gets its own separate Google token, which stays on the page. Only the name and ID of the file you pick return to the extension. Only when you use the picker.</dd>
+      <dd>Loads Google's Picker through <code>picker.keetar.com</code>, a <a href="https://github.com/papacodebear/google-picker-bridge">static page Keetar operates</a> on Cloudflare. That page gets its own separate Google token, which stays on the page. Only the name and ID of the file you pick return to the extension. Only when you use the picker.</dd>
     </dl>
     <p><strong>"Organize with your own AI"</strong> doesn't call any AI service. It generates a text export of titles, URLs and folders, never usernames or passwords, which you paste into an assistant of your choice yourself.</p>
 
